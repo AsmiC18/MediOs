@@ -1,0 +1,29 @@
+# compiled output
+/dist
+/node_modules
+/build
+/coverage
+
+# env
+.env
+.env.local
+.env.*.local
+
+# logs
+logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# tests / tooling
+/.nyc_output
+/.idea
+.vscode/*
+!.vscode/extensions.json
+
+# prisma
+/prisma/*.db
+/prisma/*.db-journal

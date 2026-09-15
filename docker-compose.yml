@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: medios-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: medios
+      POSTGRES_PASSWORD: medios
+      POSTGRES_DB: medios
+    ports:
+      - "5433:5432"
+    volumes:
+      - medios_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medios -d medios"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    container_name: medios-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://medios:medios@postgres:5432/medios?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  medios_pgdata:
