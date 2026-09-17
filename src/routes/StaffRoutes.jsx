@@ -1,0 +1,132 @@
+import React from "react";
+import { Routes, Route, Navigate } from "react-router-dom";
+
+import StaffConsoleLayout from "../layouts/StaffConsoleLayout";
+
+import DailyDashboardPage
+  from "../features/reports/pages/DailyDashboardPage";
+
+import PatientSearchPage
+  from "../features/patientCrm/pages/PatientSearchPage";
+
+import NewPatientPage
+  from "../features/patientCrm/pages/NewPatientPage";
+
+import PatientProfilePage
+  from "../features/patientCrm/pages/PatientProfilePage";
+
+import CalendarPage
+  from "../features/scheduling/pages/CalendarPage";
+
+import InboxPage
+  from "../features/whatsapp/pages/InboxPage";
+
+import InvoiceBuilderPage
+  from "../features/billing/pages/InvoiceBuilderPage";
+
+import AttendanceDashboardPage
+  from "../features/attendance/pages/AttendanceDashboardPage";
+
+import ClaimsDashboardPage
+  from "../features/insurance/pages/ClaimsDashboardPage";
+
+import LiveQueueBoardPage
+  from "../features/departments/opd/pages/LiveQueueBoardPage";
+
+import BedBoardPage
+  from "../features/departments/ipd/pages/BedBoardPage";
+
+import DispensingPage
+  from "../features/departments/pharmacy/pages/DispensingPage";
+
+import ResultUploadPage
+  from "../features/departments/diagnostics/pages/ResultUploadPage";
+
+const StaffRoutes = () => {
+  return (
+    <Routes>
+
+      <Route element={<StaffConsoleLayout />}>
+
+        <Route
+          index
+          element={
+            <Navigate
+              to="/staff/dashboard"
+              replace
+            />
+          }
+        />
+
+        <Route
+          path="dashboard"
+          element={<DailyDashboardPage />}
+        />
+
+        <Route
+          path="patients"
+          element={<PatientSearchPage />}
+        />
+
+        <Route
+          path="patients/new"
+          element={<NewPatientPage />}
+        />
+
+        <Route
+          path="patients/:patientId"
+          element={<PatientProfilePage />}
+        />
+
+        <Route
+          path="scheduling"
+          element={<CalendarPage />}
+        />
+
+        <Route
+          path="whatsapp"
+          element={<InboxPage />}
+        />
+
+        <Route
+          path="billing"
+          element={<InvoiceBuilderPage />}
+        />
+
+        <Route
+          path="attendance"
+          element={<AttendanceDashboardPage />}
+        />
+
+        <Route
+          path="insurance"
+          element={<ClaimsDashboardPage />}
+        />
+
+        <Route
+          path="departments/opd"
+          element={<LiveQueueBoardPage />}
+        />
+
+        <Route
+          path="departments/ipd"
+          element={<BedBoardPage />}
+        />
+
+        <Route
+          path="departments/pharmacy"
+          element={<DispensingPage />}
+        />
+
+        <Route
+          path="departments/diagnostics"
+          element={<ResultUploadPage />}
+        />
+
+      </Route>
+
+    </Routes>
+  );
+};
+
+export default StaffRoutes;
