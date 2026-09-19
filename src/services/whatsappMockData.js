@@ -114,6 +114,7 @@ const p4 = {
   gender: "Male",
   allergies: "None",
   lastVisit: "02 Sep 2026",
+  missedAppointment: true,
 };
 const p5 = {
   id: "P0105",
@@ -141,6 +142,7 @@ const p7 = {
   gender: "Female",
   allergies: "None",
   lastVisit: "21 Aug 2026",
+  missedAppointment: true,
 };
 const p8 = {
   id: "P0108",
@@ -168,6 +170,7 @@ const p10 = {
   gender: "Male",
   allergies: "None",
   lastVisit: "10 Sep 2026",
+  missedAppointment: true,
 };
 
 // Broadcast audience pool (patients reachable via WhatsApp). Conversations
@@ -222,6 +225,7 @@ export const PATIENT_POOL = [
     upcomingAppointment: false,
     followUpDue: true,
     reportPending: false,
+    missedAppointment: true,
   },
   {
     id: "P0114",
@@ -248,6 +252,7 @@ export const PATIENT_POOL = [
     upcomingAppointment: false,
     followUpDue: true,
     reportPending: false,
+    missedAppointment: true,
   },
   {
     id: "P0116",
@@ -287,6 +292,7 @@ export const PATIENT_POOL = [
     upcomingAppointment: false,
     followUpDue: true,
     reportPending: true,
+    missedAppointment: true,
   },
   {
     id: "P0119",
@@ -877,6 +883,16 @@ export const BROADCAST_SEGMENTS = [
     description: "Patients waiting for lab / diagnostic reports.",
   },
   {
+    id: "recent-patients",
+    label: "Recent Patients",
+    description: "Patients who visited in the last 14 days.",
+  },
+  {
+    id: "missed-appointments",
+    label: "Missed Appointments",
+    description: "Patients who missed a scheduled visit.",
+  },
+  {
     id: "custom",
     label: "Custom Selection",
     description: "Manually pick recipients from the patient list.",
@@ -887,9 +903,13 @@ export const INITIAL_BROADCASTS = [
   {
     id: "BR-2026-004",
     name: "Appointment Reminder — 18 Sep",
+    templateId: "T-1002",
+    templateName: "Appointment Reminder",
     message:
-      "Reminder: you have a visit at MediOS Hospital today. Please arrive " +
-      "15 minutes early.",
+      "Hello {{patient_name}},\n\nThis is a friendly reminder for your " +
+      "appointment with {{doctor_name}} on {{appointment_date}} at " +
+      "{{appointment_time}}.\n\nPlease arrive 15 minutes early and carry " +
+      "previous reports.\n\nThank you,\n{{hospital_name}}",
     segment: "todays-appointments",
     segmentLabel: "Today's Appointments",
     recipientCount: 42,
@@ -902,24 +922,30 @@ export const INITIAL_BROADCASTS = [
   {
     id: "BR-2026-003",
     name: "Flu Season Awareness",
+    templateId: "T-1011",
+    templateName: "General Announcement",
     message:
-      "Flu season is here. Book your vaccination slot at MediOS Hospital " +
-      "by replying to this message.",
+      "Hello {{patient_name}},\n\n{{hospital_name}} wishes you and your " +
+      "family good health. For appointments and health queries, reply to " +
+      "this message or call our helpline. Best regards,\n{{hospital_name}}",
     segment: "all-patients",
     segmentLabel: "All Patients",
     recipientCount: 240,
     sentCount: 238,
     failedCount: 2,
     status: "sent",
-    createdBy: "Raiesh Iyer",
+    createdBy: "Rajesh Iyer",
     sentAt: "15 Sep 2026, 10:30 AM",
   },
   {
     id: "BR-2026-002",
     name: "Pending Reports Notice",
+    templateId: "T-1007",
+    templateName: "Lab Report Ready",
     message:
-      "Your lab reports are ready. Download them using the link shared " +
-      "earlier. Contact the lab desk for assistance.",
+      "Hello {{patient_name}},\n\nYour lab report is ready and has been " +
+      "shared securely. You can view and download it here:\n{{report_link}}\n\n" +
+      "For any questions, please contact our lab desk.\n{{hospital_name}}",
     segment: "pending-reports",
     segmentLabel: "Pending Reports",
     recipientCount: 18,
@@ -932,9 +958,13 @@ export const INITIAL_BROADCASTS = [
   {
     id: "BR-2026-001",
     name: "Follow-up Due Campaign",
+    templateId: "T-1004",
+    templateName: "Follow-up Reminder",
     message:
-      "You are due for a follow-up visit. Please reply to reschedule at " +
-      "your convenience.",
+      "Hello {{patient_name}},\n\nWe hope you are recovering well after " +
+      "your visit to {{department}}. Please reply to this message if you " +
+      "have any concerns, or reply 1 if you are feeling better.\n\n" +
+      "Warm regards,\n{{hospital_name}}",
     segment: "follow-up-due",
     segmentLabel: "Follow-up Due",
     recipientCount: 23,
