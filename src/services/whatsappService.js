@@ -27,6 +27,54 @@ const clone = (value) =>
     ? value
     : JSON.parse(JSON.stringify(value));
 
+const MONTH_SHORT = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+const parseDayMonthYear = (text) => {
+  const parts = String(text || "").trim().split(/\s+/);
+
+  if (parts.length !== 3) {
+    return null;
+  }
+
+  const day = parseInt(parts[0], 10);
+  const month = MONTH_SHORT.indexOf(parts[1].slice(0, 3));
+  const year = parseInt(parts[2], 10);
+
+  if (Number.isNaN(day) || month === -1 || Number.isNaN(year)) {
+    return null;
+  }
+
+  return new Date(year, month, day);
+};
+
+const withinDays = (dateOnly, days) => {
+  const date = parseDayMonthYear(dateOnly);
+
+  if (!date) {
+    return false;
+  }
+
+  const today = new Date();
+  const from = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const target = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffMs = from.getTime() - target.getTime();
+
+  return diffMs >= 0 && diffMs <= days * 24 * 3600000;
+};
+
 const pickSegmentPatients = (segmentId, customIds = []) => {
   if (segmentId === "custom") {
     return PATIENT_POOL.filter((patient) =>
@@ -48,6 +96,16 @@ const pickSegmentPatients = (segmentId, customIds = []) => {
 
   if (segmentId === "pending-reports") {
     return PATIENT_POOL.filter((patient) => patient.reportPending);
+  }
+
+  if (segmentId === "recent-patients") {
+    return PATIENT_POOL.filter((patient) =>
+      withinDays(patient.lastVisit, 14)
+    );
+  }
+
+  if (segmentId === "missed-appointments") {
+    return PATIENT_POOL.filter((patient) => patient.missedAppointment);
   }
 
   return PATIENT_POOL;
@@ -353,6 +411,8 @@ const whatsappService = {
       id: `BR-2026-${String(state.broadcasts.length + 1).padStart(3, "0")}`,
       name: payload.name || "Untitled Broadcast",
       message: payload.message,
+      templateId: payload.templateId || null,
+      templateName: payload.templateName || null,
       segment: payload.segmentId,
       segmentLabel: payload.segmentLabel,
       recipientCount: payload.recipientCount,
@@ -392,6 +452,26 @@ const whatsappService = {
     saveBroadcasts();
 
     return clone(broadcast);
+  },
+
+  // Simulates the WhatsApp Business API delivery run for a broadcast.
+  // There is no real API connected yet, so a small realistic failure rate
+  // is applied instead of pretending every message was delivered.
+  simulateBroadcastOutcome: async (recipientCount) => {
+    await delay(900);
+
+    const total = Math.max(0, Number(recipientCount) || 0);
+    const failed =
+      total > 0
+        ? Math.min(total, Math.round(total * (0.01 + Math.random() * 0.02)))
+        : 0;
+    const sentCount = total - failed;
+
+    return {
+      status: failed === total ? "failed" : "completed",
+      sentCount,
+      failedCount: failed,
+    };
   },
 };
 
