@@ -18,8 +18,17 @@ import PatientProfilePage
 import CalendarPage
   from "../features/scheduling/pages/CalendarPage";
 
+import WhatsAppModuleLayout
+  from "../features/whatsapp/layouts/WhatsAppModuleLayout";
+
 import InboxPage
   from "../features/whatsapp/pages/InboxPage";
+
+import TemplateManagerPage
+  from "../features/whatsapp/pages/TemplateManagerPage";
+
+import BroadcastComposerPage
+  from "../features/whatsapp/pages/BroadcastComposerPage";
 
 import InvoiceBuilderPage
   from "../features/billing/pages/InvoiceBuilderPage";
@@ -85,8 +94,35 @@ const StaffRoutes = () => {
 
         <Route
           path="whatsapp"
-          element={<InboxPage />}
-        />
+          element={<WhatsAppModuleLayout />}
+        >
+
+          <Route
+            index
+            element={
+              <Navigate
+                to="/staff/whatsapp/inbox"
+                replace
+              />
+            }
+          />
+
+          <Route
+            path="inbox"
+            element={<InboxPage />}
+          />
+
+          <Route
+            path="templates"
+            element={<TemplateManagerPage />}
+          />
+
+          <Route
+            path="broadcasts"
+            element={<BroadcastComposerPage />}
+          />
+
+        </Route>
 
         <Route
           path="billing"
