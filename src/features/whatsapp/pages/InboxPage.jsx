@@ -11,6 +11,7 @@ import QuickReplyButtons from "../components/QuickReplyButtons";
 import HandoverIndicator from "../components/HandoverIndicator";
 import ConversationActionsMenu from "../components/ConversationActionsMenu";
 import PatientContextPanel from "../components/PatientContextPanel";
+import "../styles/inbox.css";
 
 const FILTERS = [
   { key: "all", label: "All" },
@@ -170,7 +171,20 @@ const InboxPage = () => {
     toastTimer.current = setTimeout(() => setToast(null), 3200);
   };
 
+  const handleClearSelection = () => {
+    setActiveId(null);
+    setSelecting(false);
+    setDraft("");
+    setQuickRepliesOpen(false);
+    setContextOpen(false);
+  };
+
   const handleSelectConversation = (conversation) => {
+    if (conversation.id === activeId) {
+      handleClearSelection();
+      return;
+    }
+
     setActiveId(conversation.id);
     setSelecting(true);
     setDraft("");
@@ -416,7 +430,7 @@ const InboxPage = () => {
           </strong>
         </div>
         <div className="wa-stat-chip">
-          <span>Resolved today</span>
+          <span>Resolved</span>
           <strong>
             {conversations.filter((c) => c.status === "resolved").length}
           </strong>
@@ -456,6 +470,7 @@ const InboxPage = () => {
             currentUserId={user?.id}
             onSelect={handleSelectConversation}
             onClearFilters={handleClearFilters}
+            onClearSelection={handleClearSelection}
           />
 
           <section className="wa-thread-panel" aria-label="Conversation thread">
@@ -483,7 +498,7 @@ const InboxPage = () => {
                   </button>
 
                   <span
-                    className="wa-avatar wa-avatar-lg"
+                    className="wa-avatar wa-avatar-lg wa-avatar-solid"
                     aria-hidden="true"
                   >
                     {initialsOf(activeConversation.patient.name)}
@@ -511,6 +526,14 @@ const InboxPage = () => {
                   </div>
 
                   <div className="wa-thread-actions">
+                    <button
+                      type="button"
+                      className="wa-info-button"
+                      onClick={() => setContextOpen(true)}
+                    >
+                      Patient info
+                    </button>
+
                     {abilities.assign && (
                       <HandoverIndicator
                         assignedTo={activeConversation.assignedTo}
@@ -529,17 +552,6 @@ const InboxPage = () => {
                     />
                   </div>
                 </div>
-
-                <PatientContextPanel
-                  conversation={activeConversation}
-                  open={contextOpen}
-                  onToggle={() => setContextOpen((current) => !current)}
-                  onViewPatient={handleViewPatient}
-                  onViewAppointment={() => navigate("/staff/scheduling")}
-                  onCreateFollowUp={handleCreateFollowUp}
-                  canCreateFollowUp={abilities.resolve}
-                  followUpCreated={Boolean(followUps[activeConversation.id])}
-                />
 
                 {quickRepliesOpen && (
                   <QuickReplyButtons
@@ -571,6 +583,20 @@ const InboxPage = () => {
               </>
             )}
           </section>
+
+          <PatientContextPanel
+            conversation={activeConversation}
+            open={contextOpen}
+            onClose={() => setContextOpen(false)}
+            onViewPatient={handleViewPatient}
+            onViewAppointment={() => navigate("/staff/scheduling")}
+            onCreateFollowUp={handleCreateFollowUp}
+            canCreateFollowUp={abilities.resolve}
+            followUpCreated={Boolean(
+              activeConversation &&
+                followUps[activeConversation.id]
+            )}
+          />
         </div>
       )}
 

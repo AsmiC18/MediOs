@@ -31,17 +31,22 @@ const Composer = forwardRef(
 
     return (
       <div className="wa-composer">
-        {quickReplyCount > 0 && (
+        <div className="wa-composer-toolbar">
           <button
             type="button"
             className={`wa-quickreply-toggle ${openQuickReplies ? "open" : ""}`}
             onClick={onToggleQuickReplies}
             aria-expanded={openQuickReplies}
-            disabled={disabled}
+            disabled={disabled || quickReplyCount === 0}
           >
-            Quick replies
+            <span aria-hidden="true">✦</span> Quick replies
+            {quickReplyCount > 0 && ` (${quickReplyCount})`}
           </button>
-        )}
+
+          <p className="wa-composer-hint">
+            Press Enter to send · Shift + Enter for a new line
+          </p>
+        </div>
 
         <div className="wa-composer-row">
           <textarea
@@ -62,13 +67,9 @@ const Composer = forwardRef(
             disabled={disabled || !value.trim()}
             aria-label="Send message"
           >
-            Send
+            Send <span aria-hidden="true">→</span>
           </button>
         </div>
-
-        <p className="wa-composer-hint">
-          Press Enter to send · Shift + Enter for a new line
-        </p>
       </div>
     );
   }

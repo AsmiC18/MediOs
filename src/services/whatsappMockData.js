@@ -1,9 +1,3 @@
-// WhatsApp module mock data.
-//
-// Isolated so it can later be replaced by real API responses without touching
-// any component. Timestamps are generated relative to "now" so the inbox
-// always feels live.
-
 const now = Date.now();
 
 const minsAgo = (n) => new Date(now - n * 60000).toISOString();

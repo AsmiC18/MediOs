@@ -28,12 +28,13 @@ const ConversationListItem = ({
         .join(" ")}
       onClick={() => onSelect(conversation)}
       aria-pressed={active}
-      aria-label={`Open conversation with ${conversation.patient.name}`}
+      aria-label={
+        active
+          ? `Clear conversation with ${conversation.patient.name}`
+          : `Open conversation with ${conversation.patient.name}`
+      }
     >
-      <span
-        className="wa-avatar"
-        aria-hidden="true"
-      >
+      <span className="wa-avatar" aria-hidden="true">
         {initialsOf(conversation.patient.name)}
       </span>
 
@@ -61,19 +62,20 @@ const ConversationListItem = ({
         </span>
 
         <span className="wa-conversation-item-meta">
-          {conversation.status === "resolved" && (
+          {conversation.status === "resolved" ? (
             <span className="wa-mini-status resolved">Resolved</span>
+          ) : (
+            <span className="wa-mini-status open">Open</span>
           )}
 
           {assignee ? (
             <span className="wa-mini-assignee">
-              → {assignee.name.split(" ")[0]}
+              {assignee.name.split(" ")[0]}
             </span>
           ) : (
-            <span className="wa-mini-assignee unassigned">
-              Unassigned
-            </span>
+            <span className="wa-mini-assignee unassigned">Unassigned</span>
           )}
+
           {conversation.context?.department && (
             <span className="wa-mini-department">
               {conversation.context.department}
@@ -97,6 +99,7 @@ const ConversationList = ({
   currentUserId,
   onSelect,
   onClearFilters,
+  onClearSelection,
 }) => {
   const counts = {
     all: conversations.length,
@@ -110,11 +113,45 @@ const ConversationList = ({
 
   const showEmpty = conversations.length === 0;
   const searching = search.trim().length > 0;
+  const active = Boolean(activeId);
 
   return (
     <aside className="wa-list-panel" aria-label="Conversation list">
       <div className="wa-list-header">
-        <div className="wa-filter-chips" role="group" aria-label="Conversation filters">
+        <div className="wa-list-title-row">
+          <span className="wa-list-title">Conversations</span>
+          <span className="wa-list-count">{counts.all}</span>
+
+          {active && onClearSelection && (
+            <button
+              type="button"
+              className="wa-clear-selection"
+              onClick={onClearSelection}
+            >
+              Clear selection
+            </button>
+          )}
+        </div>
+
+        <div className="wa-list-search-box">
+          <span className="wa-search-icon" aria-hidden="true">
+            ⌕
+          </span>
+          <input
+            type="search"
+            className="wa-list-search"
+            placeholder="Search name, phone, ID, message..."
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+            aria-label="Search conversations"
+          />
+        </div>
+
+        <div
+          className="wa-filter-chips"
+          role="group"
+          aria-label="Conversation filters"
+        >
           {filters.map((filter) => (
             <button
               key={filter.key}
@@ -133,15 +170,6 @@ const ConversationList = ({
             </button>
           ))}
         </div>
-
-        <input
-          type="search"
-          className="wa-list-search"
-          placeholder="Search conversations..."
-          value={search}
-          onChange={(event) => onSearchChange(event.target.value)}
-          aria-label="Search conversations"
-        />
 
         {(activeFilter !== "all" || searching) && (
           <button

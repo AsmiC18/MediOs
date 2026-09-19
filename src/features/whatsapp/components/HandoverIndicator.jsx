@@ -13,7 +13,11 @@ const HandoverIndicator = ({ assignedTo, staff, onAssign, disabled = false }) =>
 
   return (
     <div className="wa-handover">
-      <span className="wa-handover-label">Assigned to</span>
+      <span
+        className={`wa-assignee-chip ${assignedTo ? "" : "unassigned"}`}
+      >
+        {assignedTo ? assignee?.name : "Unassigned"}
+      </span>
 
       <select
         className="wa-handover-select"
@@ -21,6 +25,7 @@ const HandoverIndicator = ({ assignedTo, staff, onAssign, disabled = false }) =>
         onChange={handleChange}
         disabled={disabled}
         aria-label="Assigned staff member"
+        title="Assign or hand over this conversation"
       >
         <option value="unassigned">Unassigned</option>
 
@@ -30,12 +35,6 @@ const HandoverIndicator = ({ assignedTo, staff, onAssign, disabled = false }) =>
           </option>
         ))}
       </select>
-
-      {(assignee || !assignedTo) && (
-        <span className={`wa-assignee-chip ${assignedTo ? "" : "unassigned"}`}>
-          {assignedTo ? assignee.name : "Not assigned yet"}
-        </span>
-      )}
     </div>
   );
 };

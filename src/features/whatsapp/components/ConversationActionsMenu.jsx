@@ -83,12 +83,6 @@ const ConversationActionsMenu = ({
             </button>
           )}
 
-          {canShowAssign && (
-            <span className="wa-menu-hint">
-              Hand over via the "Assigned to" selector in the header.
-            </span>
-          )}
-
           <button
             type="button"
             role="menuitem"
@@ -99,6 +93,12 @@ const ConversationActionsMenu = ({
           >
             View patient profile
           </button>
+
+          {canShowAssign && (
+            <span className="wa-menu-hint">
+              Hand over via the "Assigned to" selector in the header.
+            </span>
+          )}
         </div>
       )}
     </div>
