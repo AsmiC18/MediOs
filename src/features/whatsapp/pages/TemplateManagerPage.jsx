@@ -2,9 +2,10 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../../../context/AuthContext";
 import { useWhatsappAbilities } from "../utils/whatsappAbilities";
 import whatsappService from "../../../services/whatsappService";
-import { extractVariables } from "../utils/templateVariables";
+import TemplateCard from "../components/TemplateCard";
 import TemplateEditor from "../components/TemplateEditor";
 import TemplatePreview from "../components/TemplatePreview";
+import "../styles/templates.css";
 
 const TemplateManagerPage = () => {
   const { user } = useAuth();
@@ -79,6 +80,7 @@ const TemplateManagerPage = () => {
       const matchesSearch =
         !query ||
         template.name.toLowerCase().includes(query) ||
+        template.category.toLowerCase().includes(query) ||
         template.body.toLowerCase().includes(query);
 
       return matchesCategory && matchesStatus && matchesSearch;
@@ -211,16 +213,21 @@ const TemplateManagerPage = () => {
       </div>
 
       <div className="wa-toolbar">
-        <input
-          type="search"
-          className="wa-filter-input"
-          placeholder="Search templates..."
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          aria-label="Search templates"
-        />
+        <div className="wa-template-search">
+          <span className="wa-search-icon" aria-hidden="true">
+            ⌕
+          </span>
+          <input
+            type="search"
+            placeholder="Search name, category or message…"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            aria-label="Search templates"
+          />
+        </div>
 
         <select
+          className="wa-template-select"
           value={categoryFilter}
           onChange={(event) => setCategoryFilter(event.target.value)}
           aria-label="Filter by category"
@@ -235,6 +242,7 @@ const TemplateManagerPage = () => {
         </select>
 
         <select
+          className="wa-template-select"
           value={statusFilter}
           onChange={(event) => setStatusFilter(event.target.value)}
           aria-label="Filter by status"
@@ -247,10 +255,31 @@ const TemplateManagerPage = () => {
             </option>
           ))}
         </select>
+
+        {(search ||
+          categoryFilter !== "all" ||
+          statusFilter !== "all") && (
+          <button
+            type="button"
+            className="wa-filter-clear"
+            onClick={() => {
+              setSearch("");
+              setCategoryFilter("all");
+              setStatusFilter("all");
+            }}
+          >
+            Clear filters
+          </button>
+        )}
+
+        <span className="wa-toolbar-count">
+          Showing {filteredTemplates.length} of {templates.length}{" "}
+          templates
+        </span>
       </div>
 
       {notice && (
-        <div className="wa-notice" role="status">
+        <div className="wa-toast" role="status">
           {notice}
         </div>
       )}
@@ -273,148 +302,87 @@ const TemplateManagerPage = () => {
           </button>
         </div>
       ) : (
-        <div className="wa-table-card">
-          <div className="wa-table-scroll">
-            <table className="wa-table">
-              <thead>
-                <tr>
-                  <th>Template</th>
-                  <th>Category</th>
-                  <th>Message body</th>
-                  <th>Variables</th>
-                  <th>Status</th>
-                  <th>Updated</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {filteredTemplates.map((template) => {
-                  const variables = extractVariables(template.body);
-
-                  return (
-                    <tr key={template.id}>
-                      <td>
-                        <strong className="wa-cell-primary">
-                          {template.name}
-                        </strong>
-                        <span className="wa-cell-secondary">
-                          {template.id} · {template.language.toUpperCase()}
-                        </span>
-                      </td>
-
-                      <td>
-                        <span className="wa-category-tag">
-                          {template.category}
-                        </span>
-                      </td>
-
-                      <td>
-                        <span className="wa-body-preview">
-                          {template.body.split("\n")[0]}
-                        </span>
-                      </td>
-
-                      <td>
-                        <span className="wa-var-count">
-                          {variables.length}
-                        </span>
-                      </td>
-
-                      <td>
-                        <span
-                          className={`wa-status-badge ${template.status.toLowerCase()}`}
-                        >
-                          {template.status}
-                        </span>
-                      </td>
-
-                      <td>
-                        <span className="wa-cell-secondary">
-                          {template.updatedAt}
-                        </span>
-                        <span className="wa-cell-muted">
-                          by {template.createdBy}
-                        </span>
-                      </td>
-
-                      <td>
-                        <div className="wa-row-actions">
-                          <button
-                            type="button"
-                            className="view-button"
-                            onClick={() =>
-                              setPreviewTemplate(template)
-                            }
-                          >
-                            Preview
-                          </button>
-
-                          {canManage && (
-                            <>
-                              <button
-                                type="button"
-                                className="view-button"
-                                onClick={() => {
-                                  setEditingTemplate(template);
-                                  setEditorOpen(true);
-                                }}
-                              >
-                                Edit
-                              </button>
-
-                              <button
-                                type="button"
-                                className="view-button"
-                                onClick={(event) =>
-                                  handleDuplicate(template, event)
-                                }
-                                disabled={busy}
-                              >
-                                Duplicate
-                              </button>
-
-                              <button
-                                type="button"
-                                className="view-button danger"
-                                onClick={() => setDeleteTarget(template)}
-                                disabled={busy}
-                              >
-                                Delete
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-
-                {filteredTemplates.length === 0 && (
-                  <tr>
-                    <td colSpan="7" className="wa-empty-cell">
-                      {templates.length === 0
-                        ? "No templates yet. Create your first template to get started."
-                        : "No templates match your current filters."}
-
-                      {!canManage && templates.length === 0 && (
-                        <span className="wa-empty-sub">
-                          Template management requires admin access.
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+        <>
+          <div className="wa-template-grid">
+          {filteredTemplates.map((template) => (
+            <TemplateCard
+              key={template.id}
+              template={template}
+              canManage={canManage}
+              busy={busy}
+              onPreview={() => setPreviewTemplate(template)}
+              onEdit={() => {
+                setEditingTemplate(template);
+                setEditorOpen(true);
+              }}
+              onDuplicate={(event) => handleDuplicate(template, event)}
+              onDelete={() => setDeleteTarget(template)}
+            />
+          ))}
         </div>
+
+        {filteredTemplates.length === 0 && (
+          <div className="wa-empty-state">
+            <span className="wa-empty-state-icon" aria-hidden="true">
+              ≡
+            </span>
+
+            {templates.length === 0 ? (
+              <>
+                <h3>No templates yet</h3>
+                <p>
+                  Create your first template to get started with
+                  approved, reusable WhatsApp messages.
+                </p>
+
+                {canManage && (
+                  <button
+                    type="button"
+                    className="primary-action"
+                    onClick={() => {
+                      setEditingTemplate(null);
+                      setEditorOpen(true);
+                    }}
+                  >
+                    + Create Template
+                  </button>
+                )}
+
+                {!canManage && (
+                  <p>Template management requires admin access.</p>
+                )}
+              </>
+            ) : (
+              <>
+                <h3>No templates match your filters</h3>
+                <p>
+                  Try a broader search or clear the category and status
+                  filters to see all templates.
+                </p>
+
+                <button
+                  type="button"
+                  className="primary-action"
+                  onClick={() => {
+                    setSearch("");
+                    setCategoryFilter("all");
+                    setStatusFilter("all");
+                  }}
+                >
+                  Clear filters
+                </button>
+              </>
+            )}
+          </div>
+        )}
+        </>
       )}
 
       <TemplateEditor
         open={editorOpen}
         initial={editingTemplate}
         categories={categories}
+        existing={templates}
         onClose={() => setEditorOpen(false)}
         onSave={async (editing, payload) => {
           const saved = await handleSave(editing, payload);

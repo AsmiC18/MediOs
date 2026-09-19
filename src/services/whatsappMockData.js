@@ -684,22 +684,17 @@ export const CONVERSATIONS = [
 ];
 
 export const TEMPLATE_CATEGORIES = [
-  "Appointment Confirmation",
-  "Appointment Reminder",
-  "Appointment Rescheduling",
-  "Lab Report",
-  "Prescription / Medication Reminder",
-  "Follow-up",
-  "Post-visit Message",
-  "Patient Satisfaction",
-  "General Communication",
+  "Appointment",
+  "Clinical",
+  "Diagnostics",
+  "General",
 ];
 
 export const TEMPLATES = [
   {
     id: "T-1001",
     name: "Appointment Confirmation",
-    category: "Appointment Confirmation",
+    category: "Appointment",
     language: "en",
     status: "Approved",
     createdBy: "Priya Verma",
@@ -712,8 +707,8 @@ export const TEMPLATES = [
   },
   {
     id: "T-1002",
-    name: "Appointment Reminder (24h)",
-    category: "Appointment Reminder",
+    name: "Appointment Reminder",
+    category: "Appointment",
     language: "en",
     status: "Approved",
     createdBy: "Priya Verma",
@@ -727,11 +722,11 @@ export const TEMPLATES = [
   },
   {
     id: "T-1003",
-    name: "Appointment Reschedule Notice",
-    category: "Appointment Rescheduling",
+    name: "Appointment Rescheduling",
+    category: "Appointment",
     language: "en",
     status: "Approved",
-    createdBy: "Raiesh Iyer",
+    createdBy: "Rajesh Iyer",
     createdAt: "28 Aug 2026",
     updatedAt: "08 Sep 2026",
     body:
@@ -741,37 +736,8 @@ export const TEMPLATES = [
   },
   {
     id: "T-1004",
-    name: "Lab Report Ready",
-    category: "Lab Report",
-    language: "en",
-    status: "Approved",
-    createdBy: "Suresh Nair",
-    createdAt: "25 Aug 2026",
-    updatedAt: "06 Sep 2026",
-    body:
-      "Hello {{patient_name}},\n\nYour lab report is ready and has been " +
-      "shared securely. You can view and download it here:\n{{report_link}}\n\n" +
-      "For any questions, please contact our lab desk.\n{{hospital_name}}",
-  },
-  {
-    id: "T-1005",
-    name: "Medication Reminder",
-    category: "Prescription / Medication Reminder",
-    language: "en",
-    status: "Draft",
-    createdBy: "Dr. Arun Kumar",
-    createdAt: "18 Sep 2026",
-    updatedAt: "18 Sep 2026",
-    body:
-      "Hi {{patient_name}},\n\nGentle reminder to take your prescribed " +
-      "medication as per the schedule given by {{doctor_name}}. If you " +
-      "experience any side effects, please contact us right away.\n\n" +
-      "Stay healthy,\n{{hospital_name}}",
-  },
-  {
-    id: "T-1006",
-    name: "Follow-up Check-in",
-    category: "Follow-up",
+    name: "Follow-up Reminder",
+    category: "Clinical",
     language: "en",
     status: "Approved",
     createdBy: "Dr. Arjun Nair",
@@ -784,9 +750,9 @@ export const TEMPLATES = [
       "Warm regards,\n{{hospital_name}}",
   },
   {
-    id: "T-1007",
-    name: "After Visit Summary",
-    category: "Post-visit Message",
+    id: "T-1005",
+    name: "Post-Visit Message",
+    category: "Clinical",
     language: "en",
     status: "Approved",
     createdBy: "Priya Verma",
@@ -794,37 +760,93 @@ export const TEMPLATES = [
     updatedAt: "02 Sep 2026",
     body:
       "Dear {{patient_name}},\n\nThank you for visiting {{hospital_name}} " +
-      "on {{appointment_date}}. Your visit summary and prescriptions are " +
-      "available in your account.\n\nPlease follow up with {{doctor_name}} " +
-      "as advised.\n\n{{hospital_name}}",
+      "on {{appointment_date}}. If you have any questions about your " +
+      "treatment or medication, simply reply to this message and our team " +
+      "will assist you.\n\nStay healthy,\n{{hospital_name}}",
+  },
+  {
+    id: "T-1006",
+    name: "Prescription Reminder",
+    category: "Clinical",
+    language: "en",
+    status: "Draft",
+    createdBy: "Dr. Arun Kumar",
+    createdAt: "18 Sep 2026",
+    updatedAt: "18 Sep 2026",
+    body:
+      "Hi {{patient_name}},\n\nA gentle reminder to take your medication as " +
+      "prescribed by {{doctor_name}}. If you experience any side effects, " +
+      "please contact us right away.\n\nStay healthy,\n{{hospital_name}}",
+  },
+  {
+    id: "T-1007",
+    name: "Lab Report Ready",
+    category: "Diagnostics",
+    language: "en",
+    status: "Approved",
+    createdBy: "Suresh Nair",
+    createdAt: "25 Aug 2026",
+    updatedAt: "06 Sep 2026",
+    body:
+      "Hello {{patient_name}},\n\nYour lab report is ready and has been " +
+      "shared securely. You can view and download it here:\n{{report_link}}\n\n" +
+      "For any questions, please contact our lab desk.\n{{hospital_name}}",
   },
   {
     id: "T-1008",
-    name: "Patient Satisfaction Survey",
-    category: "Patient Satisfaction",
+    name: "Diagnostic Report Available",
+    category: "Diagnostics",
     language: "en",
-    status: "Approved",
-    createdBy: "Raiesh Iyer",
-    createdAt: "10 Aug 2026",
-    updatedAt: "20 Aug 2026",
+    status: "Draft",
+    createdBy: "Suresh Nair",
+    createdAt: "22 Aug 2026",
+    updatedAt: "28 Aug 2026",
     body:
-      "Hello {{patient_name}},\n\nWe value your feedback. Please rate your " +
-      "experience at {{hospital_name}} on a scale of 1 to 5 by replying to " +
-      "this message.\n\nYour response helps us serve you better.",
+      "Dear {{patient_name}},\n\nYour diagnostic report is now available. " +
+      "Kindly download it securely here:\n{{report_link}}\n\nPlease share " +
+      "it with {{doctor_name}} during your next visit.\n{{hospital_name}}",
   },
   {
     id: "T-1009",
-    name: "General Season Greetings",
-    category: "General Communication",
+    name: "Patient Feedback",
+    category: "General",
+    language: "en",
+    status: "Approved",
+    createdBy: "Rajesh Iyer",
+    createdAt: "10 Aug 2026",
+    updatedAt: "20 Aug 2026",
+    body:
+      "Hello {{patient_name}},\n\nThank you for choosing {{hospital_name}}. " +
+      "We value your feedback — please reply with a rating from 1 to 5 to " +
+      "help us improve our care.\n\nYour response helps us serve you better.",
+  },
+  {
+    id: "T-1010",
+    name: "Thank You",
+    category: "General",
+    language: "en",
+    status: "Approved",
+    createdBy: "Priya Verma",
+    createdAt: "05 Aug 2026",
+    updatedAt: "14 Aug 2026",
+    body:
+      "Dear {{patient_name}},\n\nThank you for visiting {{department}} at " +
+      "{{hospital_name}}. We hope to see you again soon.\n\nWarm regards,\n" +
+      "{{hospital_name}}",
+  },
+  {
+    id: "T-1011",
+    name: "General Announcement",
+    category: "General",
     language: "en",
     status: "Suspended",
-    createdBy: "Raiesh Iyer",
+    createdBy: "Rajesh Iyer",
     createdAt: "01 Aug 2026",
     updatedAt: "05 Sep 2026",
     body:
       "Hello {{patient_name}},\n\n{{hospital_name}} wishes you and your " +
       "family good health. For appointments and health queries, reply to " +
-      "this message or call our helpline.",
+      "this message or call our helpline. Best regards,\n{{hospital_name}}",
   },
 ];
 

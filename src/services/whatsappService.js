@@ -77,7 +77,7 @@ const persist = (path, value) => {
 
 let state = {
   conversations: getPersisted("medios_whatsapp_conversations", CONVERSATIONS),
-  templates: getPersisted("medios_whatsapp_templates", TEMPLATES),
+  templates: getPersisted("medios_whatsapp_templates_v2", TEMPLATES),
   broadcasts: getPersisted("medios_whatsapp_broadcasts", INITIAL_BROADCASTS),
 };
 
@@ -85,7 +85,7 @@ const saveConversations = () =>
   persist("medios_whatsapp_conversations", state.conversations);
 
 const saveTemplates = () =>
-  persist("medios_whatsapp_templates", state.templates);
+  persist("medios_whatsapp_templates_v2", state.templates);
 
 const saveBroadcasts = () =>
   persist("medios_whatsapp_broadcasts", state.broadcasts);
@@ -296,10 +296,19 @@ const whatsappService = {
       throw new Error("Template not found.");
     }
 
+    const baseName = `${source.name} (Copy)`;
+    let name = baseName;
+    let suffix = 2;
+
+    while (state.templates.some((t) => t.name === name)) {
+      name = `${baseName} ${suffix}`;
+      suffix += 1;
+    }
+
     const duplicate = {
       ...clone(source),
       id: `T-${Date.now()}`,
-      name: `${source.name} (Copy)`,
+      name,
       status: "Draft",
       createdAt: new Date().toISOString().slice(0, 10),
       updatedAt: new Date().toISOString().slice(0, 10),

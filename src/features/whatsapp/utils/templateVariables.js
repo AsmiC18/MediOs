@@ -1,17 +1,17 @@
 // Template variable specs, safe resolution and WhatsApp time formatting.
 
 export const TEMPLATE_VARIABLES = [
-  { key: "patient_name", label: "Patient Name", sample: "Rahul Sharma" },
-  { key: "doctor_name", label: "Doctor Name", sample: "Dr. Kavita Mehta" },
+  { key: "patient_name", label: "Patient Name", sample: "Kavita Joshi" },
+  { key: "doctor_name", label: "Doctor Name", sample: "Dr. Sunita Rao" },
   {
     key: "appointment_date",
     label: "Appointment Date",
-    sample: "21 September 2026",
+    sample: "21 Sep 2026",
   },
   {
     key: "appointment_time",
     label: "Appointment Time",
-    sample: "4:30 PM",
+    sample: "5:15 PM",
   },
   { key: "department", label: "Department", sample: "Cardiology" },
   { key: "hospital_name", label: "Hospital Name", sample: "MediOS Hospital" },
@@ -56,6 +56,26 @@ export function extractVariables(body) {
   }
 
   return keys;
+}
+
+// Returns the keys of every {{variable}} that is NOT a known template
+// variable. Used to keep template bodies aligned with the approved set.
+export function extractUnknownVariables(body) {
+  const known = TEMPLATE_VARIABLES.map((variable) => variable.key);
+  const unknown = [];
+  const pattern = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
+
+  let match = pattern.exec(body);
+
+  while (match) {
+    if (!known.includes(match[1]) && !unknown.includes(match[1])) {
+      unknown.push(match[1]);
+    }
+
+    match = pattern.exec(body);
+  }
+
+  return unknown;
 }
 
 const HOUR = 3600000;
