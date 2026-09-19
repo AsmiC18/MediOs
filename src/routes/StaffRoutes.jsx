@@ -6,6 +6,9 @@ import StaffConsoleLayout from "../layouts/StaffConsoleLayout";
 import DailyDashboardPage
   from "../features/reports/pages/DailyDashboardPage";
 
+import PharmacyDashboardPage
+  from "../features/departments/pharmacy/pages/PharmacyDashboardPage";
+
 import PatientSearchPage
   from "../features/patientCrm/pages/PatientSearchPage";
 
@@ -35,6 +38,9 @@ import InvoiceBuilderPage
 
 import AttendanceDashboardPage
   from "../features/attendance/pages/AttendanceDashboardPage";
+  
+import DepartmentsOverviewPage
+  from "../features/departments/pages/DepartmentsOverviewPage";
 
 import ClaimsDashboardPage
   from "../features/insurance/pages/ClaimsDashboardPage";
@@ -47,6 +53,13 @@ import BedBoardPage
 
 import DispensingPage
   from "../features/departments/pharmacy/pages/DispensingPage";
+
+import PrescriptionQueuePage
+  from "../features/departments/pharmacy/pages/PrescriptionQueuePage";
+
+import StockManagementPage
+  from "../features/departments/pharmacy/pages/StockManagementPage";
+
 
 import ResultUploadPage
   from "../features/departments/diagnostics/pages/ResultUploadPage";
@@ -161,10 +174,10 @@ const StaffRoutes = () => {
           element={<ClaimsDashboardPage />}
         />
 
-        <Route
+       <Route
           path="departments"
-          element={<Navigate to="/staff/departments/ipd" replace />}
-        />
+          element={<DepartmentsOverviewPage />}
+        />  
 
         <Route
           path="departments/opd"
@@ -176,9 +189,24 @@ const StaffRoutes = () => {
           element={<BedBoardPage />}
         />
 
-        <Route
-          path="departments/pharmacy"
-          element={<DispensingPage />}
+        <Route 
+          path="departments/pharmacy" 
+          element={<PharmacyDashboardPage />} 
+        /> 
+
+        <Route 
+          path="departments/pharmacy/dispensing" 
+          element={<DispensingPage />} 
+        /> 
+
+        <Route 
+          path="departments/pharmacy/prescriptions" 
+          element={<PrescriptionQueuePage />} 
+        /> 
+
+        <Route 
+          path="departments/pharmacy/stock" 
+          element={<StockManagementPage />} 
         />
 
         <Route
