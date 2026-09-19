@@ -1,0 +1,788 @@
+/* =========================================================
+   MEDIOS WHATSAPP — BROADCASTS (scoped)
+   All classes use the wa-* prefix and only target the broadcast
+   subtree. Reuses the shared wa-* palette/badge/toast/modal
+   styles already defined by inbox.css and templates.css.
+   ========================================================= */
+
+.wa-broadcasts-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.wa-broadcasts-page .wa-summary-strip {
+  margin-bottom: 0;
+}
+
+.wa-broadcast-stats {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: -14px 0 0;
+}
+
+/* =========================
+   STATUS BADGES (broadcast)
+   ========================= */
+
+.wa-broadcasts-page .wa-status-badge.completed {
+  background: var(--wa-teal-tint);
+  color: var(--wa-teal-text);
+}
+
+.wa-broadcasts-page .wa-status-badge.sending {
+  background: var(--wa-warn-bg);
+  color: var(--wa-accent);
+}
+
+.wa-broadcasts-page .wa-status-badge.failed {
+  background: var(--wa-danger-bg);
+  color: var(--wa-danger);
+}
+
+.wa-broadcasts-page .wa-status-badge.draft {
+  background: #E4E7E5;
+  color: var(--wa-muted-2);
+}
+
+.wa-broadcasts-page .wa-status-badge.approved {
+  background: var(--wa-teal-tint);
+  color: var(--wa-teal-text);
+}
+
+.wa-broadcasts-page .wa-status-badge.suspended {
+  background: #E4E7E5;
+  color: var(--wa-muted-2);
+}
+
+/* =========================
+   LAYOUT — composer + preview aside
+   ========================= */
+
+.wa-broadcast-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 16px;
+  align-items: start;
+}
+
+.wa-broadcast-card {
+  background: var(--wa-paper);
+  border: 1px solid var(--wa-border);
+  border-radius: 12px;
+  padding: 22px;
+}
+
+.wa-broadcast-card-title {
+  margin: 0 0 16px;
+  color: var(--wa-ink);
+  font-size: 17px;
+}
+
+.wa-wizard {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.wa-wizard-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* =========================
+   WIZARD STEPS
+   ========================= */
+
+.wa-wizard-step {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wa-wizard-step-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wa-step-index {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--wa-teal-soft);
+  color: var(--wa-teal);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.wa-step-index.is-done {
+  background: var(--wa-teal);
+  color: var(--wa-white);
+}
+
+.wa-step-index.is-active {
+  background: var(--wa-teal);
+  color: var(--wa-white);
+}
+
+.wa-wizard-step-header strong {
+  color: var(--wa-ink);
+  font-size: 14.5px;
+}
+
+.wa-wizard-step-header small {
+  display: block;
+  margin-top: 1px;
+  color: var(--wa-muted);
+  font-size: 12px;
+}
+
+.wa-step-body {
+  min-height: 210px;
+}
+
+/* =========================
+   SEGMENT PICKER (step 1)
+   ========================= */
+
+.wa-sb-section-label {
+  display: block;
+  color: var(--wa-faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 9px;
+}
+
+.wa-segment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.wa-segment-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 14px;
+  text-align: left;
+  background: var(--wa-white);
+  border: 1px solid var(--wa-border-soft);
+  border-radius: var(--wa-radius);
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.wa-segment-option:hover {
+  border-color: var(--wa-teal);
+}
+
+.wa-segment-option.selected {
+  border-color: var(--wa-teal);
+  background: var(--wa-teal-tint);
+}
+
+.wa-segment-radio {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border: 2px solid var(--wa-input-border);
+  border-radius: 50%;
+  transition: border-color 0.15s ease;
+}
+
+.wa-segment-option.selected .wa-segment-radio {
+  border-color: var(--wa-teal);
+  background: var(--wa-teal);
+  box-shadow: inset 0 0 0 3px var(--wa-teal-tint);
+}
+
+.wa-segment-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.wa-segment-text strong {
+  display: block;
+  color: var(--wa-ink-deep);
+  font-size: 13.5px;
+}
+
+.wa-segment-text small {
+  display: block;
+  margin-top: 1px;
+  color: var(--wa-muted);
+  font-size: 11.5px;
+}
+
+.wa-segment-count {
+  flex-shrink: 0;
+  color: var(--wa-faint);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Custom selection list */
+
+.wa-custom-picker {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--wa-border-soft);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wa-custom-search {
+  width: 100%;
+  padding: 10px 13px;
+  border: 1px solid var(--wa-input-border);
+  border-radius: var(--wa-radius-sm);
+  background: var(--wa-white);
+  color: var(--wa-ink);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.wa-custom-search:focus {
+  outline: none;
+  border-color: var(--wa-teal);
+}
+
+.wa-custom-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--wa-border-soft);
+  border-radius: var(--wa-radius-sm);
+}
+
+.wa-custom-list li + li {
+  border-top: 1px solid var(--wa-border-soft);
+}
+
+.wa-custom-list label {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 13px;
+  cursor: pointer;
+}
+
+.wa-custom-list label:hover {
+  background: var(--wa-ivory);
+}
+
+.wa-custom-list input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--wa-teal);
+  flex-shrink: 0;
+}
+
+.wa-custom-list strong {
+  display: block;
+  color: var(--wa-ink-deep);
+  font-size: 13px;
+}
+
+.wa-custom-list small {
+  display: block;
+  margin-top: 1px;
+  color: var(--wa-muted);
+  font-size: 11.5px;
+}
+
+.wa-custom-empty {
+  padding: 16px 13px;
+  color: var(--wa-muted);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.wa-custom-hint {
+  margin: 0;
+  color: var(--wa-muted);
+  font-size: 12px;
+}
+
+/* =========================
+   MESSAGE STEP (step 2) — template list
+   ========================= */
+
+.wa-template-option {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 13px 14px;
+  text-align: left;
+  background: var(--wa-white);
+  border: 1px solid var(--wa-border-soft);
+  border-radius: var(--wa-radius);
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.wa-template-option:hover:not(:disabled) {
+  border-color: var(--wa-teal);
+}
+
+.wa-template-option.selected {
+  border-color: var(--wa-teal);
+  background: var(--wa-teal-tint);
+}
+
+.wa-template-option:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.wa-template-option-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.wa-template-option-text strong {
+  display: block;
+  color: var(--wa-ink-deep);
+  font-size: 13.5px;
+}
+
+.wa-template-option-text small {
+  display: block;
+  margin-top: 2px;
+  color: var(--wa-muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wa-template-option-meta {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.wa-step-body .wa-segment-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.wa-template-options {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+/* =========================
+   CONFIRMATION STEP (step 3)
+   ========================= */
+
+.wa-confirm-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wa-confirm-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--wa-border-soft);
+}
+
+.wa-confirm-list li:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.wa-confirm-key {
+  color: var(--wa-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.wa-confirm-value {
+  text-align: right;
+  color: var(--wa-ink-deep);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wa-confirm-note {
+  margin: 14px 0 0;
+  padding: 11px 13px;
+  background: var(--wa-ivory);
+  border: 1px solid var(--wa-border-soft);
+  border-radius: var(--wa-radius-sm);
+  color: var(--wa-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* =========================
+   WIZARD NAV + SENDING
+   ========================= */
+
+.wa-wizard-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 4px;
+  padding-top: 16px;
+  border-top: 1px solid var(--wa-border-soft);
+}
+
+.wa-wizard-nav .nav-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wa-wizard-nav .primary-action:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.wa-sending-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 26px 12px;
+  color: var(--wa-muted);
+  font-size: 13.5px;
+}
+
+/* =========================
+   SUCCESS CARD
+   ========================= */
+
+.wa-success-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  padding: 30px 18px;
+}
+
+.wa-success-icon {
+  width: 54px;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--wa-teal-soft);
+  color: var(--wa-teal);
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.wa-success-card h3 {
+  margin: 6px 0 0;
+  color: var(--wa-ink);
+  font-size: 17px;
+}
+
+.wa-success-card p {
+  margin: 0;
+  color: var(--wa-muted);
+  font-size: 13px;
+  max-width: 420px;
+  line-height: 1.5;
+}
+
+.wa-success-counts {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.wa-success-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* =========================
+   PREVIEW ASIDE
+   ========================= */
+
+.wa-preview-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  position: sticky;
+  top: 16px;
+}
+
+.wa-preview-card {
+  background: var(--wa-paper);
+  border: 1px solid var(--wa-border);
+  border-radius: 12px;
+  padding: 16px 0 0;
+}
+
+.wa-broadcast-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 14px 22px 16px;
+  border-top: 1px dashed var(--wa-border-soft);
+}
+
+.wa-broadcast-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wa-broadcast-meta-row span {
+  color: var(--wa-muted);
+  font-size: 12px;
+}
+
+.wa-broadcast-meta-row strong {
+  color: var(--wa-ink-deep);
+  font-size: 12.5px;
+  text-align: right;
+}
+
+/* =========================
+   HISTORY
+   ========================= */
+
+.wa-history-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wa-history-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.wa-history-head h2 {
+  margin: 0;
+  color: var(--wa-ink);
+  font-size: 17px;
+}
+
+.wa-history-head small {
+  color: var(--wa-muted);
+  font-size: 12.5px;
+}
+
+.wa-broadcast-history {
+  background: var(--wa-paper);
+  border: 1px solid var(--wa-border);
+  border-radius: 12px;
+  overflow-x: auto;
+}
+
+.wa-history-table {
+  width: 100%;
+  min-width: 860px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.wa-history-table th {
+  padding: 12px 16px;
+  text-align: left;
+  color: var(--wa-faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: var(--wa-strip);
+  border-bottom: 1px solid var(--wa-border-soft);
+  white-space: nowrap;
+}
+
+.wa-history-table td {
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--wa-border-soft);
+  color: var(--wa-muted-2);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.wa-history-table tr:last-child td {
+  border-bottom: none;
+}
+
+.wa-history-table tbody tr {
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.wa-history-table tbody tr:hover {
+  background: var(--wa-teal-tint);
+}
+
+.wa-history-primary strong {
+  display: block;
+  color: var(--wa-ink-deep);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.wa-history-primary small {
+  display: block;
+  margin-top: 2px;
+  color: var(--wa-muted);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
+.wa-history-num {
+  font-variant-numeric: tabular-nums;
+  color: var(--wa-ink-deep);
+}
+
+.wa-history-num.failed {
+  color: var(--wa-danger);
+  font-weight: 600;
+}
+
+.wa-history-loading {
+  min-height: 180px;
+}
+
+/* =========================
+   DETAIL MODAL
+   ========================= */
+
+.wa-broadcast-detail-modal {
+  max-width: 620px;
+}
+
+.wa-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 24px;
+  padding: 6px 24px 0;
+}
+
+.wa-detail-item span {
+  display: block;
+  color: var(--wa-faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 3px;
+}
+
+.wa-detail-item strong {
+  color: var(--wa-ink-deep);
+  font-size: 13.5px;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+/* =========================
+   PERMISSION NOTE
+   ========================= */
+
+.wa-permission-note {
+  padding: 30px 22px;
+  text-align: center;
+  background: var(--wa-paper);
+  border: 1px dashed var(--wa-border);
+  border-radius: 12px;
+  color: var(--wa-muted);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+/* =========================
+   RESPONSIVE
+   ========================= */
+
+@media (max-width: 1100px) {
+  .wa-broadcast-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wa-preview-aside {
+    position: static;
+  }
+}
+
+@media (max-width: 700px) {
+  .wa-broadcast-card {
+    padding: 16px;
+  }
+
+  .wa-wizard-nav {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .wa-wizard-nav .nav-group {
+    justify-content: stretch;
+  }
+
+  .wa-wizard-nav .nav-group .primary-action,
+  .wa-wizard-nav .nav-group .secondary-action {
+    flex: 1;
+  }
+
+  .wa-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wa-confirm-list li {
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .wa-confirm-value {
+    text-align: left;
+  }
+}
