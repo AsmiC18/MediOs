@@ -90,12 +90,7 @@ export default function StaffConsoleLayout() {
               Main Branch ▾
             </button>
 
-            <div className="global-search">
-              <input
-                type="text"
-                placeholder="Search patients, appointments..."
-              />
-            </div>
+           
           </div>
 
           <div className="navbar-right">

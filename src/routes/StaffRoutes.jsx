@@ -41,6 +41,14 @@ import DispensingPage
 
 import ResultUploadPage
   from "../features/departments/diagnostics/pages/ResultUploadPage";
+  import AbhaLinkingPage
+  from "../features/abdm/pages/AbhaLinkingPage";
+
+import ConsentRequestPage
+  from "../features/abdm/pages/ConsentRequestPage";
+
+import ComplianceSettingsPage
+  from "../features/abdm/pages/ComplianceSettingsPage";
 
 const StaffRoutes = () => {
   return (
@@ -92,6 +100,20 @@ const StaffRoutes = () => {
           path="billing"
           element={<InvoiceBuilderPage />}
         />
+        <Route
+          path="abdm"
+          element={<AbhaLinkingPage />}
+        />
+
+        <Route
+          path="abdm/consent"
+          element={<ConsentRequestPage />}
+        />
+
+        <Route
+          path="abdm/compliance"
+          element={<ComplianceSettingsPage />}
+        />
 
         <Route
           path="attendance"
@@ -101,6 +123,11 @@ const StaffRoutes = () => {
         <Route
           path="insurance"
           element={<ClaimsDashboardPage />}
+        />
+
+        <Route
+          path="departments"
+          element={<Navigate to="/staff/departments/ipd" replace />}
         />
 
         <Route

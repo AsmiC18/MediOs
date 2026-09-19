@@ -2,7 +2,7 @@ import React from "react";
 
 const dashboardData = {
   revenue: {
-    amount: "₹...",
+    amount: "₹1,24,500",
     label: "Today's revenue",
   },
 
@@ -95,7 +95,7 @@ export default function DailyDashboardPage() {
       <div className="page-header">
 
         <div>
-          <h1>Daily Dashboard</h1>
+          <h1>Dashboard</h1>
           <p>
             Overview of today's hospital operations
           </p>
