@@ -17,6 +17,14 @@ const MOCK_USER = {
     "appointments.create",
     "clinical.view",
     "clinical.edit",
+    "whatsapp.inbox.view",
+    "whatsapp.inbox.reply",
+    "whatsapp.inbox.assign",
+    "whatsapp.inbox.resolve",
+    "whatsapp.templates.view",
+    "whatsapp.templates.manage",
+    "whatsapp.broadcasts.view",
+    "whatsapp.broadcasts.send",
   ],
 
   branches: [
