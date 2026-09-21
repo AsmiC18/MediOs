@@ -50,7 +50,56 @@ src/
   patients/
   scheduling/
   billing/
+  abdm/
   audit/
   common/
   main.ts
 ```
+
+## ABDM (Week 5)
+
+The `src/abdm/` module provides a local ABDM foundation with tenant isolation, RBAC, audit logging, and mock-first external adapters.
+
+### Mock mode (default)
+
+`ABDM_MOCK_MODE=true` (or unset in sandbox) keeps all ABDM external calls local and deterministic. This is the safe default for development and tests.
+
+In production (`ABDM_ENV=production`), mock mode is **off by default** unless `ABDM_MOCK_MODE=true` is explicitly set.
+
+### Real integrations currently available
+
+| Feature | Real mode | Notes |
+| --- | --- | --- |
+| Gateway session auth | Yes | Requires sandbox/production client credentials |
+| ABHA link-token request | Yes | Requires credentials + configured HIP ID |
+| HFR registry search | Partial | Requires explicit `ABDM_HFR_SEARCH_URL` |
+| ABHA callback | Partial | Optional `ABDM_CALLBACK_SECRET` header validation |
+
+### Deferred / not implemented
+
+- Full ABDM Consent Manager API (adapter returns 503 in real mode)
+- Real HPR registry sync (503 in real mode)
+- Real ABHA verify via gateway (400 in real mode)
+- Production HFR/HPR registration workflows
+- Care contexts, FHIR, health record exchange
+- Callback JWT signature validation (deferred)
+
+### Permissions
+
+- `abdm:read` / `abdm:manage` — hospital config, HFR/HPR, ABHA
+- `abdm:consent:read` / `abdm:consent:manage` — consent lifecycle
+
+All ABDM queries are scoped by JWT `hospitalId`. Client-supplied hospital IDs are never trusted.
+
+### Environment variables
+
+See `.env.example` for all `ABDM_*` settings. Do not commit real credentials.
+
+### Tests
+
+```bash
+npm run build
+node scripts/test-abdm.cjs
+```
+
+Requires the API running on port 3000 and a seeded database.
