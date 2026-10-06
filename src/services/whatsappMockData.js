@@ -81,7 +81,7 @@ export const QUICK_REPLIES = [
 
 const p1 = {
   id: "P0101",
-  name: "Rahul Sharma",
+  name: "Devansh Jain",
   phone: "+91 98470 22331",
   age: 42,
   gender: "Male",
@@ -361,7 +361,7 @@ export const CONVERSATIONS = [
       {
         id: "M-1001-d",
         outgoing: false,
-        text: "She has a few questions about my diet plan.",
+        text: "i love devansh",
         at: minsAgo(18),
       },
     ],

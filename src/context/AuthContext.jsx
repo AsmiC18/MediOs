@@ -26,7 +26,7 @@ const MOCK_USER = {
     "whatsapp.broadcasts.view",
     "whatsapp.broadcasts.send",
   ],
-
+  
   branches: [
     {
       id: "B001",
