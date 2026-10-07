@@ -90,7 +90,7 @@ const p1 = {
 };
 const p2 = {
   id: "P0102",
-  name: "Priya Mehta",
+  name: "Dhanesh Baheti",
   phone: "+91 98470 22332",
   age: 35,
   gender: "Female",
