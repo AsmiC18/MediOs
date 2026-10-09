@@ -74,6 +74,11 @@ import ConsentRequestPage
 import ComplianceSettingsPage
   from "../features/abdm/pages/ComplianceSettingsPage";
 
+import EmergencyPage from "../features/departments/emergency/pages/EmergencyPage";
+
+import OtSchedulingPage from "../features/departments/surgery/pages/OtSchedulingPage";
+import PreOpChecklistPage from "../features/departments/surgery/pages/PreOpChecklistPage";
+
 const StaffRoutes = () => {
   return (
     <Routes>
@@ -214,6 +219,19 @@ const StaffRoutes = () => {
         <Route
           path="departments/diagnostics"
           element={<ResultUploadPage />}
+        />
+        <Route
+          path="departments/emergency"
+          element={<EmergencyPage />}
+        />
+        <Route
+          path="departments/surgery"
+          element={<OtSchedulingPage />}
+        />
+
+        <Route
+          path="departments/surgery/pre-op-checklist"
+          element={<PreOpChecklistPage />}
         />
 
       </Route>
