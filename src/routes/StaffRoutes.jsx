@@ -26,6 +26,8 @@ import WhatsAppModuleLayout
 
 import InboxPage
   from "../features/whatsapp/pages/InboxPage";
+import LiveInboxPage from "../features/whatsapp/pages/LiveInboxPage";
+import { isLiveWhatsApp } from "../services/whatsappApi";
 
 import TemplateManagerPage
   from "../features/whatsapp/pages/TemplateManagerPage";
@@ -130,17 +132,17 @@ const StaffRoutes = () => {
 
           <Route
             path="inbox"
-            element={<InboxPage />}
+            element={isLiveWhatsApp ? <LiveInboxPage /> : <InboxPage />}
           />
 
           <Route
             path="templates"
-            element={<TemplateManagerPage />}
+            element={isLiveWhatsApp ? <div role="status">Template APIs are not connected yet.</div> : <TemplateManagerPage />}
           />
 
           <Route
             path="broadcasts"
-            element={<BroadcastComposerPage />}
+            element={isLiveWhatsApp ? <div role="status">Broadcast APIs are not connected yet.</div> : <BroadcastComposerPage />}
           />
 
         </Route>

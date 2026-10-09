@@ -1,5 +1,7 @@
 import React from "react";
 import { NavLink, Outlet } from "react-router-dom";
+import { isLiveWhatsApp } from "../../../services/whatsappApi";
+import "../styles/live.css";
 
 const TABS = [
   {
@@ -23,7 +25,7 @@ const WhatsAppModuleLayout = () => {
   return (
     <div className="wa-module">
       <nav className="wa-module-tabs" aria-label="WhatsApp sections">
-        {TABS.map((tab) => (
+        {TABS.filter(tab => !isLiveWhatsApp || tab.label === "Inbox").map((tab) => (
           <NavLink
             key={tab.path}
             to={tab.path}
@@ -37,6 +39,9 @@ const WhatsAppModuleLayout = () => {
         ))}
       </nav>
 
+      <p className="wa-connection-note" role="status">{isLiveWhatsApp
+        ? "Backend mode: inbox APIs enabled. Templates and broadcasts are not connected yet."
+        : "Demo mode: conversations and sends are simulated locally. No WhatsApp messages are sent."}</p>
       <Outlet />
     </div>
   );

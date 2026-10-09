@@ -1,0 +1,80 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Conversation {
+  id            String    @id @default(uuid())
+  hospitalId    String
+  branchId      String
+  phone         String
+  displayName   String
+  patientId     String?
+  assignedTo    String?
+  status        String    @default("open")
+  unreadCount   Int       @default(0)
+  lastInboundAt DateTime?
+  lastMessageAt DateTime  @default(now())
+  messages      Message[]
+
+  @@unique([hospitalId, branchId, phone])
+  @@index([hospitalId, branchId, lastMessageAt])
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  outgoing       Boolean
+  text           String
+  at             DateTime     @default(now())
+  status         String
+  providerId     String?      @unique
+  idempotencyKey String?      @unique
+  job            SendJob?
+
+  @@index([conversationId, at])
+}
+
+model SendJob {
+  id         String   @id @default(uuid())
+  messageId  String   @unique
+  message    Message  @relation(fields: [messageId], references: [id])
+  status     String   @default("queued")
+  attempts   Int      @default(0)
+  runAt      DateTime @default(now())
+  claimedAt  DateTime?
+  errorCode  String?
+
+  @@index([status, runAt])
+}
+
+model WebhookEvent {
+  key        String   @id
+  receivedAt DateTime @default(now())
+}
+
+model DeliveryReceipt {
+  key        String   @id
+  providerId String
+  status     String
+  at         DateTime
+
+  @@index([providerId, at])
+}
+
+model AuditEntry {
+  id         String   @id @default(uuid())
+  hospitalId String
+  branchId   String
+  actorId    String
+  action     String
+  resourceId String?
+  at         DateTime @default(now())
+
+  @@index([hospitalId, branchId, at])
+}

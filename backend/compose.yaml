@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:16
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: medios
+      POSTGRES_DB: medios_whatsapp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your local .env}
+    volumes:
+      - whatsapp_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U medios -d medios_whatsapp"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+volumes:
+  whatsapp_postgres:

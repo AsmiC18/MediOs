@@ -5,7 +5,7 @@ import {
 } from "../utils/templateVariables";
 
 const StatusDots = ({ status }) => {
-  const label =
+  const label = status === "queued" ? "Queued" : status === "submit_uncertain" ? "Submission uncertain — do not resend" :
     status === "read"
       ? "Read"
       : status === "delivered"
@@ -26,7 +26,7 @@ const StatusDots = ({ status }) => {
       aria-label={label}
       title={label}
     >
-      {status === "sending" ? "…" : "✓✓"}
+      {["sending", "queued"].includes(status) ? "…" : status === "submit_uncertain" ? "?" : status === "failed" ? "!" : status === "sent" ? "✓" : "✓✓"}
     </span>
   );
 };

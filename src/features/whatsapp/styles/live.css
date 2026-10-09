@@ -1,0 +1,14 @@
+.wa-live-connect, .wa-live-conversations, .wa-live-thread { background: #faf9f5; border: 1px solid #d5d6ce; border-radius: 8px; padding: 20px; }
+.wa-live-connect { max-width: 620px; display: grid; gap: 14px; }
+.wa-live-connect input { width: 100%; padding: 12px; border: 1px solid #7a8581; border-radius: 6px; }
+.wa-live-grid { display: grid; grid-template-columns: minmax(230px, 1fr) minmax(0, 2fr); gap: 18px; }
+.wa-live-conversations > button { display: grid; width: 100%; text-align: left; gap: 6px; padding: 12px; margin: 8px 0; background: transparent; color: inherit; border: 1px solid #c9ccc3; border-radius: 6px; overflow-wrap: anywhere; }
+.wa-live-conversations > button.selected { background: #dcebe7; border-color: #0b4741; }
+.wa-live-thread { min-width: 0; display: flex; flex-direction: column; height: 70vh; min-height: 400px; }
+.wa-live-thread .wa-thread { flex: 1; min-height: 0; overflow-y: auto; }
+.wa-live-heading, .wa-live-pagination { display: flex; gap: 12px; justify-content: space-between; align-items: center; }
+.wa-live-heading { overflow-wrap: anywhere; }
+.wa-live-page .wa-error-block { margin-bottom: 16px; }
+.wa-live-page .wa-error-block button { margin-left: 12px; }
+.wa-connection-note { padding: 12px 16px; background: #f4e6c9; border-radius: 6px; margin-bottom: 16px; }
+@media (max-width: 800px) { .wa-live-grid { grid-template-columns: 1fr; } .wa-live-thread { height: 65vh; } }
