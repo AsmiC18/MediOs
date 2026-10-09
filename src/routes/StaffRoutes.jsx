@@ -77,6 +77,15 @@ import EmergencyPage from "../features/departments/emergency/pages/EmergencyPage
 import OtSchedulingPage from "../features/departments/surgery/pages/OtSchedulingPage";
 import PreOpChecklistPage from "../features/departments/surgery/pages/PreOpChecklistPage";
 
+import SoapNoteEntryPage
+  from "../features/clinicalRecords/pages/SoapNoteEntryPage";
+
+import PrescriptionBuilderPage
+  from "../features/clinicalRecords/pages/PrescriptionBuilderPage";
+
+import ClinicalRecordsPage from
+  "../features/clinicalRecords/pages/ClinicalRecordsPage";
+
 const StaffRoutes = () => {
   return (
     <Routes>
@@ -230,6 +239,21 @@ const StaffRoutes = () => {
         <Route
           path="departments/surgery/pre-op-checklist"
           element={<PreOpChecklistPage />}
+        />
+
+       <Route
+          path="clinical-records"
+          element={<ClinicalRecordsPage />}
+        />
+
+        <Route
+          path="clinical-records/notes"
+          element={<SoapNoteEntryPage />}
+        />
+
+        <Route
+          path="clinical-records/prescriptions"
+          element={<PrescriptionBuilderPage />}
         />
 
       </Route>

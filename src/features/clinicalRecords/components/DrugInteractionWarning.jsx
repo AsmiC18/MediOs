@@ -1,11 +1,30 @@
-import React from "react";
-
-const DrugInteractionWarning = () => {
+export default function DrugInteractionWarning({ warnings = [] }) {
   return (
-    <div className="druginteractionwarning">
-      {/* TODO: implement DrugInteractionWarning */}
-    </div>
-  );
-};
+    <section
+      className={`clinical-warning ${
+        warnings.length ? "clinical-warning-danger" : "clinical-warning-neutral"
+      }`}
+      aria-live="polite"
+    >
+      <h3>
+        {warnings.length
+          ? "Medication safety review required"
+          : "Medication safety review"}
+      </h3>
 
-export default DrugInteractionWarning;
+      {warnings.length ? (
+        <ul>
+          {warnings.map((warning, index) => (
+            <li key={`${index}-${warning}`}>{warning}</li>
+          ))}
+        </ul>
+      ) : (
+        <p>
+          No warnings were identified by the current rules.
+        </p>
+      )}
+
+   
+    </section>
+  );
+}
