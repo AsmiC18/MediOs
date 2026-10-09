@@ -13,7 +13,7 @@ First messaging slice using NestJS, TypeScript, PostgreSQL and Prisma. Dependenc
 
 ## Setup when ready
 
-Requires Node 22+ and PostgreSQL. From this directory:
+Requires Node 22.12+ (or Node 24+) and PostgreSQL. From this directory:
 
 ```powershell
 npm install
@@ -26,6 +26,8 @@ npm start
 ```
 
 The build/start path uses TypeScript decorator metadata for Nest dependency injection. `npm run dev` watches and recompiles source; run `node --watch dist/main.js` in a second terminal after the first successful compilation.
+
+Prisma 7 reads the migration connection URL from `prisma.config.ts`, and the runtime client uses `@prisma/adapter-pg`. Generated TypeScript lives in ignored `src/generated/prisma`; `npm run build` regenerates it automatically. The TypeScript project uses Node16 resolution and an explicit `src` root directory.
 
 Server binds to localhost:3001. Set up an HTTPS reverse proxy/tunnel for Meta callbacks. Configure callback `/api/webhooks/whatsapp`, subscribe to WhatsApp messages, use META_VERIFY_TOKEN for verification, and META_APP_SECRET for signed POST validation. Set WORKER_ENABLED=true only after configuring the business number mapping, supported Graph version and access token.
 
@@ -57,7 +59,7 @@ Conversation fields include phone/displayName, patientId (nullable), assignedTo 
 ## Remaining integration work
 
 - Existing MediOS patient resolution, staff membership/assignment and refresh-session integration. No duplicate Patient/User tables were invented here.
-- Central login integration. An optional API inbox now supports an in-memory backend session, history pagination, delivery polling and uncertain-state display. Root VITE_WHATSAPP_MODE selects demo or api explicitly.
+- Central login integration. An optional API inbox now supports an in-memory backend session, history pagination, delivery polling and uncertain-state display. VITE_WHATSAPP_MODE in frontend/.env.local selects demo or api explicitly.
 - Approved Meta templates, template sends outside the reply window, opt-in/opt-out, broadcasts and per-recipient campaign jobs.
 - Guided booking, reminder/report/prescription automation via the existing domain services and event outbox. This slice queues its own messages transactionally; it does not yet consume the other backend's outbox.
 - Media download/upload, audit querying/retention, webhook/auth rate limiting, deployment configuration and operational reconciliation.

@@ -13,7 +13,7 @@ The frontend has two explicitly separated modes. `VITE_WHATSAPP_MODE=demo` uses 
 3. With Docker available, run `docker compose up -d postgres` from backend. This creates a persistent named database volume.
 4. Run `npx prisma migrate deploy`, `npm run build`, then `npm start` from backend.
 5. For local verification only, set ALLOW_DEV_TOKEN=true and set WHATSAPP_HOSPITAL_ID and WHATSAPP_BRANCH_ID to development scope IDs. Run `npm run dev:token` and copy the short-lived token privately.
-6. Set the root `.env.local` to VITE_WHATSAPP_MODE=api and VITE_API_BASE_URL=http://localhost:3001/api, then restart Vite (`npm run dev`).
+6. Set `frontend/.env.local` to VITE_WHATSAPP_MODE=api and VITE_API_BASE_URL=http://localhost:3001/api, then restart Vite (`npm run dev` from the repository root or frontend folder).
 7. Open `/staff/whatsapp/inbox` and connect the token. The existing mock login does not issue backend tokens. Empty conversations are expected until a valid signed inbound webhook arrives.
 
 ## Meta configuration still required
