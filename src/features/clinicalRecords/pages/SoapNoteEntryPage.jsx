@@ -7,7 +7,7 @@ import SoapFields from "../components/SoapFields";
 import {
   addClinicalNote,
   useClinicalNotes,
-} from "../clinicalNotesStore";
+} from "../ClinicalNotesStore";
 
 
 const emptyNote = {
