@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useClinicalNotes } from "../clinicalNotesStore";
+import { useClinicalNotes } from "../ClinicalNotesStore";
 
 export default function ClinicalRecordsPage() {
   const navigate = useNavigate();
