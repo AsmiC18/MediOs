@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 const diagnoses = [
   { code: "J06.9", name: "Acute upper respiratory infection, unspecified" },
@@ -15,10 +15,13 @@ export default function Icd10Lookup({ value, onChange }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
 
+  useEffect(() => {
+    setQuery(value ? `${value.code} — ${value.name}` : "");
+    setOpen(false);
+  }, [value]);
+
   const results = diagnoses.filter((item) =>
-    `${item.code} ${item.name}`
-      .toLowerCase()
-      .includes(query.toLowerCase())
+    `${item.code} ${item.name}`.toLowerCase().includes(query.toLowerCase())
   );
 
   function selectDiagnosis(item) {
@@ -29,19 +32,21 @@ export default function Icd10Lookup({ value, onChange }) {
 
   return (
     <div className="clinical-form-field clinical-diagnosis-lookup">
-      <label htmlFor="clinical-diagnosis-search">
-        Diagnosis (ICD-10)
-      </label>
+      <label htmlFor="clinical-diagnosis-search">Diagnosis (ICD-10)</label>
 
       <input
         id="clinical-diagnosis-search"
         type="search"
         value={query}
         onChange={(event) => {
-          setQuery(event.target.value);
+          const nextQuery = event.target.value;
+          setQuery(nextQuery);
           setOpen(true);
 
-          if (!event.target.value) {
+          if (
+            !value ||
+            nextQuery !== `${value.code} — ${value.name}`
+          ) {
             onChange(null);
           }
         }}
@@ -52,7 +57,7 @@ export default function Icd10Lookup({ value, onChange }) {
 
       {open && query.trim() && (
         <div className="clinical-search-results">
-          {results.length ? (
+          {results.length > 0 ? (
             results.map((item) => (
               <button
                 type="button"
@@ -79,7 +84,8 @@ export default function Icd10Lookup({ value, onChange }) {
       )}
 
       <p className="clinical-field-description">
-        Connect an approved ICD-10 catalogue for clinical use.
+        Prototype catalogue only. Connect an approved ICD-10 catalogue for
+        clinical use.
       </p>
     </div>
   );

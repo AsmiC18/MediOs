@@ -1,420 +1,367 @@
 
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import CriticalAlertBanner, {
+  updateEmergencyCases,
+  useEmergencyCases,
+} from "../components/CriticalAlertBanner";
 
-const initialCases = [
-  {
-    id: "ER-2041",
-    patient: "Rahul Sharma",
-    age: "46",
-    complaint: "Chest pain and breathlessness",
-    severity: "Critical",
-    arrival: "14:32",
-    status: "Awaiting assessment",
-    assignedTo: "Unassigned",
-    contact: "9876543210",
-    vitals: "BP 90/60 mmHg, SpO₂ 91%",
-  },
-  {
-    id: "ER-2040",
-    patient: "Meena Devi",
-    age: "62",
-    complaint: "Fall with leg injury",
-    severity: "High",
-    arrival: "14:25",
-    status: "Under assessment",
-    assignedTo: "Dr. Nisha Patel",
-    contact: "9876501234",
-    vitals: "BP 126/82 mmHg",
-  },
-  {
-    id: "ER-2039",
-    patient: "Arjun Kumar",
-    age: "28",
-    complaint: "Fever and weakness",
-    severity: "Moderate",
-    arrival: "14:10",
-    status: "Awaiting assessment",
-    assignedTo: "Unassigned",
-    contact: "9876512340",
-    vitals: "",
-  },
+const STAFF_MEMBERS = [
+  "Dr. Nisha Patel",
+  "Dr. Mehta",
+  "Dr. Rao",
 ];
 
 const severityClass = {
-  Critical: "emergency-severity-critical",
-  High: "emergency-severity-high",
-  Moderate: "emergency-severity-moderate",
-  Low: "emergency-severity-low",
-};
-
-const initialForm = {
-  patient: "",
-  age: "",
-  contact: "",
-  complaint: "",
-  severity: "Moderate",
-  vitals: "",
+  Critical: "critical",
+  High: "high",
+  Moderate: "moderate",
+  Low: "low",
 };
 
 export default function EmergencyPage() {
-  const [cases, setCases] = useState(initialCases);
-  const [form, setForm] = useState(initialForm);
+  const navigate = useNavigate();
+  const cases = useEmergencyCases();
+
   const [search, setSearch] = useState("");
   const [severityFilter, setSeverityFilter] = useState("All");
-  const [selectedCase, setSelectedCase] = useState(null);
+  const [statusFilter, setStatusFilter] = useState("All");
+  const [selectedCaseId, setSelectedCaseId] = useState(null);
+  const [escalationCaseId, setEscalationCaseId] = useState(null);
   const [notice, setNotice] = useState("");
-  const [alertCase, setAlertCase] = useState(null);
-  const [showAlertConfirmation, setShowAlertConfirmation] = useState(false);
+
+  const selectedCase =
+    cases.find((item) => item.id === selectedCaseId) || null;
+
+  const escalationCase =
+    cases.find((item) => item.id === escalationCaseId) || null;
+
+  const activeCases = cases.filter(
+    (item) => item.status !== "Completed"
+  );
+
+  const completedCases = cases.filter(
+    (item) => item.status === "Completed"
+  );
 
   const filteredCases = useMemo(() => {
     const query = search.trim().toLowerCase();
 
-    return cases.filter((item) => {
+    return activeCases.filter((item) => {
       const matchesSearch =
         !query ||
+        item.patientName.toLowerCase().includes(query) ||
         item.id.toLowerCase().includes(query) ||
-        item.patient.toLowerCase().includes(query) ||
         item.complaint.toLowerCase().includes(query);
 
       const matchesSeverity =
-        severityFilter === "All" || item.severity === severityFilter;
+        severityFilter === "All" ||
+        item.severity === severityFilter;
 
-      return matchesSearch && matchesSeverity;
+      const matchesStatus =
+        statusFilter === "All" ||
+        item.status === statusFilter;
+
+      return matchesSearch && matchesSeverity && matchesStatus;
     });
-  }, [cases, search, severityFilter]);
+  }, [activeCases, search, severityFilter, statusFilter]);
 
-  const counts = {
-    total: cases.length,
-    critical: cases.filter((item) => item.severity === "Critical").length,
-    waiting: cases.filter(
-      (item) => item.status === "Awaiting assessment"
-    ).length,
-    active: cases.filter((item) => item.status === "Under assessment").length,
-  };
+  const criticalCount = activeCases.filter(
+    (item) =>
+      item.severity === "Critical" &&
+      item.status !== "Stabilized"
+  ).length;
 
-  const updateForm = (field, value) => {
-    setForm((current) => ({ ...current, [field]: value }));
-  };
+  const awaitingCount = activeCases.filter(
+    (item) => item.status === "Awaiting assessment"
+  ).length;
 
-  const registerPatient = (event) => {
-    event.preventDefault();
+  const unassignedCount = activeCases.filter(
+    (item) =>
+      !item.assignedTo || item.assignedTo === "Unassigned"
+  ).length;
 
-    const newCase = {
-      id: `ER-${Date.now().toString().slice(-6)}`,
-      patient: form.patient.trim(),
-      age: form.age,
-      contact: form.contact.trim(),
-      complaint: form.complaint.trim(),
-      severity: form.severity,
-      arrival: new Date().toLocaleTimeString("en-IN", {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      }),
-      status: "Awaiting assessment",
-      assignedTo: "Unassigned",
-      vitals: form.vitals.trim(),
-    };
-
-    setCases((current) => [newCase, ...current]);
-    setNotice(
-      `Emergency case ${newCase.id} registered. Assign clinical staff and assess the patient promptly.`
-    );
-    setForm(initialForm);
-  };
-
-  const updateCaseStatus = (caseId, status) => {
-    setCases((current) =>
+  function updateCase(caseId, changes) {
+    updateEmergencyCases((current) =>
       current.map((item) =>
-        item.id === caseId ? { ...item, status } : item
+        item.id === caseId ? { ...item, ...changes } : item
       )
-    );
-
-    setSelectedCase((current) =>
-      current?.id === caseId ? { ...current, status } : current
-    );
-
-    setNotice(`${caseId} updated to "${status}".`);
-  };
-
-  const requestCriticalAlert = (item) => {
-    setAlertCase(item);
-    setShowAlertConfirmation(true);
-  };
-
-
-const confirmCriticalAlert = () => {
-  if (alertCase) {
-    setCases((current) =>
-      current.map((item) =>
-        item.id === alertCase.id
-          ? { ...item, severity: "Critical" }
-          : item
-      )
-    );
-
-    setNotice(
-      `CRITICAL ALERT recorded for ${alertCase.patient} (${alertCase.id}).`
-    );
-  } else {
-    setNotice(
-      "Department-wide critical alert recorded."
     );
   }
 
-  setShowAlertConfirmation(false);
-  setAlertCase(null);
-};
+  function assignStaff(caseId, staffName) {
+    updateCase(caseId, { assignedTo: staffName });
+
+    const patient = cases.find((item) => item.id === caseId);
+    setNotice(
+      staffName === "Unassigned"
+        ? `${patient?.patientName || "Patient"} is now unassigned.`
+        : `${patient?.patientName || "Patient"} assigned to ${staffName}.`
+    );
+  }
+
+  function beginAssessment(item) {
+    updateCase(item.id, { status: "Under assessment" });
+    setNotice(`Assessment started for ${item.patientName}.`);
+  }
+
+  function markStabilized(item) {
+    updateCase(item.id, { status: "Stabilized" });
+    setNotice(
+      `${item.patientName} marked as stabilized. The patient remains in the active queue until the case is completed.`
+    );
+  }
+
+  function completeEmergencyCase(item) {
+    updateCase(item.id, { status: "Completed" });
+    setSelectedCaseId(null);
+    setNotice(
+      `${item.patientName}'s emergency case is now completed and has been removed from the active queue.`
+    );
+  }
+
+  function confirmEscalation() {
+    if (!escalationCase) return;
+
+    updateCase(escalationCase.id, { severity: "Critical" });
+    setNotice(`${escalationCase.patientName} escalated to Critical.`);
+    setEscalationCaseId(null);
+  }
+
+  function renderCaseCard(item, completed = false) {
+    return (
+      <article className="emergency-case-card" key={item.id}>
+        <div className="emergency-case-main">
+          <div className="emergency-case-title-row">
+            <span
+              className={`emergency-severity ${
+                severityClass[item.severity]
+              }`}
+            >
+              {item.severity}
+            </span>
+            <span className="emergency-case-id">{item.id}</span>
+            <span className="emergency-case-time">{item.time}</span>
+          </div>
+
+          <h3>{item.patientName}</h3>
+          <p className="emergency-case-complaint">{item.complaint}</p>
+
+          <div className="emergency-case-meta">
+            <span>Age: {item.age || "Not recorded"}</span>
+            <span>Assigned: {item.assignedTo || "Unassigned"}</span>
+            <span>Status: {item.status}</span>
+          </div>
+        </div>
+
+        <div className="emergency-case-actions">
+          <button
+            type="button"
+            className="emergency-secondary-button"
+            onClick={() => setSelectedCaseId(item.id)}
+          >
+            View details
+          </button>
+
+          {!completed && item.severity !== "Critical" && (
+            <button
+              type="button"
+              className="emergency-alert-button"
+              onClick={() => setEscalationCaseId(item.id)}
+            >
+              Escalate
+            </button>
+          )}
+
+          {!completed && item.status === "Awaiting assessment" && (
+            <button
+              type="button"
+              className="emergency-primary-button"
+              onClick={() => beginAssessment(item)}
+            >
+              Begin assessment
+            </button>
+          )}
+
+          {!completed && item.status === "Under assessment" && (
+            <button
+              type="button"
+              className="emergency-primary-button"
+              onClick={() => markStabilized(item)}
+            >
+              Mark stabilized
+            </button>
+          )}
+
+          {!completed && item.status === "Stabilized" && (
+            <button
+              type="button"
+              className="emergency-primary-button"
+              onClick={() => completeEmergencyCase(item)}
+            >
+              Complete case
+            </button>
+          )}
+        </div>
+      </article>
+    );
+  }
 
   return (
-    <div className="emergency-page">
-      <div className="emergency-header">
+    <main className="emergency-page">
+      <header className="emergency-page-header">
         <div>
-          <p className="emergency-eyebrow">DEPARTMENTS / EMERGENCY</p>
-          <h1>Emergency Department</h1>
-         
+          <p className="emergency-eyebrow">DEPARTMENT / EMERGENCY</p>
+          <h1>Emergency department</h1>
+          <p className="emergency-page-subtitle">
+            Triage, prioritize and coordinate emergency patient care.
+          </p>
         </div>
-      
-      </div>
 
-      
+        <button
+          type="button"
+          className="emergency-primary-button"
+          onClick={() =>
+            navigate("/staff/departments/emergency/triage-intake")
+          }
+        >
+          + Register patient
+        </button>
+      </header>
 
       {notice && (
         <div className="emergency-notice" role="status">
           <span>{notice}</span>
-          <button type="button" onClick={() => setNotice("")} aria-label="Dismiss message">
+          <button
+            type="button"
+            aria-label="Dismiss notification"
+            onClick={() => setNotice("")}
+          >
             ×
           </button>
         </div>
       )}
 
-      <div className="emergency-stats">
-        <div className="emergency-stat-card">
-          <span>Patients registered</span>
-          <strong>{counts.total}</strong>
-       
-        </div>
-        <div className="emergency-stat-card emergency-stat-critical">
-          <span>Critical cases</span>
-          <strong>{counts.critical}</strong>
-       
-        </div>
-        <div className="emergency-stat-card">
+      <section className="emergency-summary-grid">
+        <article className="emergency-summary-card">
+          <span>Active cases</span>
+          <strong>{activeCases.length}</strong>
+          <small>Currently in the queue</small>
+        </article>
+
+        <article className="emergency-summary-card emergency-summary-critical">
+          <span>Critical cases needing attention</span>
+          <strong>{criticalCount}</strong>
+          <small>Excludes stabilized cases</small>
+        </article>
+
+        <article className="emergency-summary-card">
           <span>Awaiting assessment</span>
-          <strong>{counts.waiting}</strong>
-        
+          <strong>{awaitingCount}</strong>
+          <small>Not yet assessed</small>
+        </article>
 
+        <article className="emergency-summary-card">
+          <span>Unassigned cases</span>
+          <strong>{unassignedCount}</strong>
+          <small>Require staff allocation</small>
+        </article>
+      </section>
+
+      <CriticalAlertBanner
+        cases={cases}
+        onViewCase={(item) => setSelectedCaseId(item.id)}
+      />
+
+      <section className="emergency-queue-section">
+        <div className="emergency-section-heading">
+          <div>
+            <h2>Active emergency queue</h2>
+            <p>Cases still requiring emergency-department follow-up.</p>
+          </div>
+          <span className="emergency-queue-total">
+            {filteredCases.length}{" "}
+            {filteredCases.length === 1 ? "case" : "cases"}
+          </span>
         </div>
-        <div className="emergency-stat-card">
-          <span>Under assessment</span>
-          <strong>{counts.active}</strong>
-     
+
+        <div className="emergency-filters">
+          <input
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search patient, case ID or complaint..."
+            aria-label="Search emergency cases"
+          />
+
+          <select
+            value={severityFilter}
+            onChange={(event) => setSeverityFilter(event.target.value)}
+            aria-label="Filter by severity"
+          >
+            <option value="All">All severities</option>
+            <option value="Critical">Critical</option>
+            <option value="High">High</option>
+            <option value="Moderate">Moderate</option>
+            <option value="Low">Low</option>
+          </select>
+
+          <select
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+            aria-label="Filter by status"
+          >
+            <option value="All">All statuses</option>
+            <option value="Awaiting assessment">Awaiting assessment</option>
+            <option value="Under assessment">Under assessment</option>
+            <option value="Stabilized">Stabilized</option>
+          </select>
         </div>
-      </div>
 
-      <div className="emergency-layout">
-        <section className="emergency-panel emergency-intake-panel">
-          <div className="emergency-panel-header">
-            <div>
-              <p className="emergency-eyebrow">QUICK REGISTRATION</p>
-              <h2>Triage intake</h2>
-             
+        <div className="emergency-case-list">
+          {filteredCases.length ? (
+            filteredCases.map((item) => renderCaseCard(item))
+          ) : (
+            <div className="emergency-empty-state">
+              <h3>No active cases match</h3>
+              <p>Try changing your search or filters.</p>
             </div>
-          
-          </div>
+          )}
+        </div>
+      </section>
 
-          <form className="emergency-form" onSubmit={registerPatient}>
-            <label className="emergency-field">
-              Patient name <span>*</span>
-              <input
-                value={form.patient}
-                onChange={(event) => updateForm("patient", event.target.value)}
-             
-                required
-              />
-            </label>
+      
+<section className="emergency-completed-section">
+  <div className="emergency-section-heading">
+    <div>
+      <h2>Completed cases</h2>
+      <p>Emergency cases marked as complete.</p>
+    </div>
 
-            <div className="emergency-form-row">
-              <label className="emergency-field">
-                Age
-                <input
-                  type="number"
-                  min="0"
-                  max="125"
-                  value={form.age}
-                  onChange={(event) => updateForm("age", event.target.value)}
-            
-                />
-              </label>
+    <span className="emergency-queue-total">
+      {completedCases.length}{" "}
+      {completedCases.length === 1 ? "case" : "cases"}
+    </span>
+  </div>
 
-              <label className="emergency-field">
-                Contact number
-                <input
-                  type="tel"
-                  value={form.contact}
-                  onChange={(event) => updateForm("contact", event.target.value)}
-                
-                />
-              </label>
-            </div>
+  {completedCases.length === 0 ? (
+    <div className="emergency-empty-state">
+      <p>No completed cases yet.</p>
+    </div>
+  ) : (
+    <div className="emergency-case-list">
+      {completedCases.map((item) => renderCaseCard(item, true))}
+    </div>
+  )}
+</section>
 
-            <label className="emergency-field">
-              Presenting complaint <span>*</span>
-              <textarea
-                rows="3"
-                value={form.complaint}
-                onChange={(event) => updateForm("complaint", event.target.value)}
-          
-                required
-              />
-            </label>
-
-            <label className="emergency-field">
-              Triage severity <span>*</span>
-              <select
-                value={form.severity}
-                onChange={(event) => updateForm("severity", event.target.value)}
-                required
-              >
-                <option value="Critical">Critical</option>
-                <option value="High">High</option>
-                <option value="Moderate">Moderate</option>
-                <option value="Low">Low</option>
-              </select>
-           
-            </label>
-
-            <label className="emergency-field">
-              Initial vitals / observations
-              <textarea
-                rows="2"
-                value={form.vitals}
-                onChange={(event) => updateForm("vitals", event.target.value)}
-              
-              />
-            </label>
-
-            <button type="submit" className="emergency-primary-button">
-              Register emergency case
-            </button>
-        
-          </form>
-        </section>
-
-        <section className="emergency-panel emergency-queue-panel">
-          <div className="emergency-panel-header">
-            <div>
-            
-              <h2>Emergency queue</h2>
-            
-            </div>
-            <span className="emergency-queue-count">{filteredCases.length} cases</span>
-          </div>
-
-          <div className="emergency-toolbar">
-            <input
-              type="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search patient, complaint or ID..."
-              aria-label="Search emergency cases"
-            />
-            <select
-              value={severityFilter}
-              onChange={(event) => setSeverityFilter(event.target.value)}
-              aria-label="Filter by severity"
-            >
-              <option value="All">All severity levels</option>
-              <option value="Critical">Critical</option>
-              <option value="High">High</option>
-              <option value="Moderate">Moderate</option>
-              <option value="Low">Low</option>
-            </select>
-          </div>
-
-          <div className="emergency-case-list">
-            {filteredCases.map((item) => (
-              <article
-                key={item.id}
-                className={`emergency-case-card ${
-                  item.severity === "Critical" ? "is-critical" : ""
-                }`}
-              >
-                <div className="emergency-case-top">
-                  <div>
-                    <span className="emergency-case-id">{item.id}</span>
-                    <h3>{item.patient}</h3>
-                    <span className="emergency-case-meta">
-                    </span>
-                  </div>
-                  <span className={`emergency-severity ${severityClass[item.severity]}`}>
-                    {item.severity}
-                  </span>
-                </div>
-
-                <p className="emergency-complaint">{item.complaint}</p>
-
-
-                <div className="emergency-case-details">
-                  <span>Assigned: <strong>{item.assignedTo}</strong></span>
-                  <span>Status: <strong>{item.status}</strong></span>
-                </div>
-
-                <div className="emergency-case-actions">
-                  <button
-                    type="button"
-                    className="emergency-secondary-button"
-                    onClick={() => setSelectedCase(item)}
-                  >
-                    View details
-                  </button>
-
-                  <button
-                    type="button"
-                    className="emergency-secondary-button"
-                    onClick={() => requestCriticalAlert(item)}
-                  >
-                    Escalate
-                  </button>
-
-                  {item.status === "Awaiting assessment" ? (
-                    <button
-                      type="button"
-                      className="emergency-primary-button"
-                      onClick={() => updateCaseStatus(item.id, "Under assessment")}
-                    >
-                      Start assessment
-                    </button>
-                  ) : item.status === "Under assessment" ? (
-                    <button
-                      type="button"
-                      className="emergency-primary-button"
-                      onClick={() => updateCaseStatus(item.id, "Stabilized")}
-                    >
-                      Mark stabilized
-                    </button>
-                  ) : (
-                    <span className="emergency-complete-label">Stabilized</span>
-                  )}
-                </div>
-              </article>
-            ))}
-
-            {filteredCases.length === 0 && (
-              <div className="emergency-empty">
-                No emergency cases match the selected filters.
-              </div>
-            )}
-          </div>
-        </section>
-      </div>
 
       {selectedCase && (
         <div
-          className="emergency-modal-overlay"
+          className="emergency-modal-backdrop"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
-              setSelectedCase(null);
+              setSelectedCaseId(null);
             }
           }}
         >
@@ -422,94 +369,109 @@ const confirmCriticalAlert = () => {
             className="emergency-modal"
             role="dialog"
             aria-modal="true"
-            aria-labelledby="emergency-detail-title"
+            aria-labelledby="emergency-details-title"
           >
             <div className="emergency-modal-header">
               <div>
-                <p className="emergency-eyebrow">{selectedCase.id}</p>
-                <h2 id="emergency-detail-title">{selectedCase.patient}</h2>
-                <span className={`emergency-severity ${severityClass[selectedCase.severity]}`}>
-                  {selectedCase.severity}
-                </span>
+                <p className="emergency-eyebrow">
+                  CASE {selectedCase.id}
+                </p>
+                <h2 id="emergency-details-title">Patient details</h2>
               </div>
+
               <button
                 type="button"
-                className="emergency-close-button"
-                onClick={() => setSelectedCase(null)}
-                aria-label="Close case details"
+                className="emergency-modal-close"
+                aria-label="Close patient details"
+                onClick={() => setSelectedCaseId(null)}
               >
                 ×
               </button>
             </div>
 
             <div className="emergency-detail-grid">
+              <div><span>Patient name</span><strong>{selectedCase.patientName}</strong></div>
               <div><span>Age</span><strong>{selectedCase.age || "Not recorded"}</strong></div>
+              <div><span>Case ID</span><strong>{selectedCase.id}</strong></div>
+              <div><span>Severity</span><strong>{selectedCase.severity}</strong></div>
               <div><span>Contact</span><strong>{selectedCase.contact || "Not recorded"}</strong></div>
-              <div><span>Arrival</span><strong>{selectedCase.arrival}</strong></div>
-              <div><span>Assigned staff</span><strong>{selectedCase.assignedTo}</strong></div>
+              <div><span>Presenting complaint</span><strong>{selectedCase.complaint}</strong></div>
+              <div><span>Blood pressure</span><strong>{selectedCase.bloodPressure || "Not recorded"}</strong></div>
+              <div><span>Oxygen saturation</span><strong>{selectedCase.oxygenSaturation ? `${selectedCase.oxygenSaturation}%` : "Not recorded"}</strong></div>
               <div><span>Current status</span><strong>{selectedCase.status}</strong></div>
-              <div><span>Initial observations</span><strong>{selectedCase.vitals || "Not recorded"}</strong></div>
             </div>
 
-            <div className="emergency-detail-complaint">
-              <span>Presenting complaint</span>
-              <p>{selectedCase.complaint}</p>
-            </div>
+            {selectedCase.status !== "Completed" && (
+              <label className="emergency-field">
+                Assign to staff member
+                <select
+                  value={selectedCase.assignedTo || "Unassigned"}
+                  onChange={(event) =>
+                    assignStaff(selectedCase.id, event.target.value)
+                  }
+                >
+                  <option value="Unassigned">Unassigned</option>
+                  {STAFF_MEMBERS.map((staffName) => (
+                    <option key={staffName} value={staffName}>
+                      {staffName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
 
             <div className="emergency-modal-footer">
+              {selectedCase.status === "Stabilized" && (
+                <button
+                  type="button"
+                  className="emergency-primary-button"
+                  onClick={() => completeEmergencyCase(selectedCase)}
+                >
+                  Complete case
+                </button>
+              )}
+
               <button
                 type="button"
                 className="emergency-secondary-button"
-                onClick={() => setSelectedCase(null)}
+                onClick={() => setSelectedCaseId(null)}
               >
                 Close
-              </button>
-              <button
-                type="button"
-                className="emergency-alert-button"
-                onClick={() => {
-                  setSelectedCase(null);
-                  requestCriticalAlert(selectedCase);
-                }}
-              >
-                Escalate case
               </button>
             </div>
           </section>
         </div>
       )}
 
-      {showAlertConfirmation && (
-        <div className="emergency-modal-overlay">
+      {escalationCase && (
+        <div className="emergency-modal-backdrop">
           <section
-            className="emergency-confirm-modal"
-            role="alertdialog"
+            className="emergency-modal emergency-confirm-modal"
+            role="dialog"
             aria-modal="true"
-            aria-labelledby="emergency-confirm-title"
+            aria-labelledby="emergency-escalation-title"
           >
-            <div className="emergency-alert-symbol">!</div>
-            <h2 id="emergency-confirm-title">Confirm critical escalation</h2>
+            <p className="emergency-eyebrow">SEVERITY CHANGE</p>
+            <h2 id="emergency-escalation-title">
+              Escalate this case to Critical?
+            </h2>
             <p>
-              {alertCase
-                ? `Mark ${alertCase.patient} (${alertCase.id}) as Critical?`
-                : "Record a critical emergency alert for the department?"}
+              {escalationCase.patientName} will be marked Critical and
+              added to the critical alert banner.
             </p>
-          
+
             <div className="emergency-modal-footer">
               <button
                 type="button"
                 className="emergency-secondary-button"
-                onClick={() => {
-                  setShowAlertConfirmation(false);
-                  setAlertCase(null);
-                }}
+                onClick={() => setEscalationCaseId(null)}
               >
                 Cancel
               </button>
               <button
                 type="button"
                 className="emergency-alert-button"
-                onClick={confirmCriticalAlert}
+                onClick={confirmEscalation}
               >
                 Confirm escalation
               </button>
@@ -517,6 +479,6 @@ const confirmCriticalAlert = () => {
           </section>
         </div>
       )}
-    </div>
+    </main>
   );
 }

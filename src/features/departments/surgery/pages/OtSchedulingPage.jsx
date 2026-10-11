@@ -1,72 +1,13 @@
-import React, { useEffect, useMemo, useState } from "react";
+
+import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import OtBookingCard from "../components/OtBookingCard";
+import OtBookingCard, {
+  getSurgeryBookings,
+  getChecklistProgress,
+  setSurgeryBookings,
+} from "../components/OtBookingCard";
 
 const today = "2026-10-10";
-const bookingsStorageKey = "medios-surgery-ot-bookings";
-
-const initialBookings = [
-  {
-    id: "OT-1001",
-    patientName: "Priya Menon",
-    patientId: "P002",
-    age: 42,
-    gender: "Female",
-    procedure: "Laparoscopic cholecystectomy",
-    surgeon: "Dr. Mehta",
-    date: today,
-    time: "09:00 AM",
-    duration: 120,
-    otRoom: "OT-1",
-    status: "Confirmed",
-    checklistComplete: true,
-    insuranceStatus: "Approved",
-    notes: "Nil known allergies",
-  },
-  {
-    id: "OT-1002",
-    patientName: "Arun Kumar",
-    patientId: "P014",
-    age: 56,
-    gender: "Male",
-    procedure: "Hernia repair",
-    surgeon: "Dr. Sharma",
-    date: today,
-    time: "11:30 AM",
-    duration: 90,
-    otRoom: "OT-2",
-    status: "Pending",
-    checklistComplete: false,
-    insuranceStatus: "Pending",
-    notes: "Review current medication",
-  },
-  {
-    id: "OT-1003",
-    patientName: "Rahul Singh",
-    patientId: "P021",
-    age: 31,
-    gender: "Male",
-    procedure: "Appendectomy",
-    surgeon: "Dr. Rao",
-    date: today,
-    time: "02:00 PM",
-    duration: 75,
-    otRoom: "OT-1",
-    status: "Pending",
-    checklistComplete: false,
-    insuranceStatus: "Approved",
-    notes: "",
-  },
-];
-
-function readSavedBookings() {
-  try {
-    const saved = localStorage.getItem(bookingsStorageKey);
-    return saved ? JSON.parse(saved) : initialBookings;
-  } catch {
-    return initialBookings;
-  }
-}
 
 const emptyForm = {
   patientName: "",
@@ -83,10 +24,48 @@ const emptyForm = {
   notes: "",
 };
 
+function toTimeInput(time) {
+  if (!time) return "09:00";
+
+  const match = time.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+
+  if (!match) return time;
+
+  let hours = Number(match[1]);
+  const minutes = match[2];
+  const period = match[3].toUpperCase();
+
+  if (period === "PM" && hours !== 12) hours += 12;
+  if (period === "AM" && hours === 12) hours = 0;
+
+  return `${String(hours).padStart(2, "0")}:${minutes}`;
+}
+
+function toTimeLabel(time) {
+  const [hoursString, minutes] = time.split(":");
+  let hours = Number(hoursString);
+  const period = hours >= 12 ? "PM" : "AM";
+
+  hours = hours % 12 || 12;
+
+  return `${String(hours).padStart(2, "0")}:${minutes} ${period}`;
+}
+
+function toMinutes(time) {
+  const match = time.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!match) return 0;
+
+  let hours = Number(match[1]) % 12;
+  const minutes = Number(match[2]);
+  if (match[3].toUpperCase() === "PM") hours += 12;
+
+  return hours * 60 + minutes;
+}
+
 export default function OtSchedulingPage() {
   const navigate = useNavigate();
-  const [bookings, setBookings] = useState(readSavedBookings);
 
+  const [bookings, setBookings] = useState(getSurgeryBookings);
   const [search, setSearch] = useState("");
   const [dateFilter, setDateFilter] = useState(today);
   const [statusFilter, setStatusFilter] = useState("All statuses");
@@ -97,58 +76,42 @@ export default function OtSchedulingPage() {
   const [form, setForm] = useState(emptyForm);
   const [notice, setNotice] = useState("");
 
-  // Save the latest booking data so it is available on the checklist page.
-  useEffect(() => {
-    try {
-      localStorage.setItem(
-        bookingsStorageKey,
-        JSON.stringify(bookings)
-      );
-    } catch {
-      // The schedule remains usable for this session.
-    }
-  }, [bookings]);
+  const updateBookings = (updater) => {
+    setBookings((current) => {
+      const next =
+        typeof updater === "function" ? updater(current) : updater;
 
-  // Read changes made on another page when returning to this page.
-  useEffect(() => {
-    const syncBookings = () => {
-      setBookings(readSavedBookings());
-    };
-
-    window.addEventListener("focus", syncBookings);
-    window.addEventListener("pageshow", syncBookings);
-
-    return () => {
-      window.removeEventListener("focus", syncBookings);
-      window.removeEventListener("pageshow", syncBookings);
-    };
-  }, []);
+      setSurgeryBookings(next);
+      return next;
+    });
+  };
 
   const filteredBookings = useMemo(() => {
-    return bookings.filter((booking) => {
-      const query = search.trim().toLowerCase();
+    const query = search.trim().toLowerCase();
 
-      const matchesSearch =
-        !query ||
-        [
-          booking.patientName,
-          booking.patientId,
-          booking.procedure,
-          booking.surgeon,
-          booking.id,
-        ].some((value) =>
-          String(value).toLowerCase().includes(query)
+    return bookings
+      .filter((booking) => {
+        const matchesSearch =
+          !query ||
+          [
+            booking.patientName,
+            booking.patientId,
+            booking.procedure,
+            booking.surgeon,
+            booking.id,
+          ].some((value) =>
+            String(value || "").toLowerCase().includes(query)
+          );
+
+        return (
+          matchesSearch &&
+          (!dateFilter || booking.date === dateFilter) &&
+          (statusFilter === "All statuses" ||
+            booking.status === statusFilter) &&
+          (roomFilter === "All OTs" || booking.otRoom === roomFilter)
         );
-
-      return (
-        matchesSearch &&
-        (!dateFilter || booking.date === dateFilter) &&
-        (statusFilter === "All statuses" ||
-          booking.status === statusFilter) &&
-        (roomFilter === "All OTs" ||
-          booking.otRoom === roomFilter)
-      );
-    });
+      })
+      .sort((a, b) => toMinutes(a.time) - toMinutes(b.time));
   }, [bookings, search, dateFilter, statusFilter, roomFilter]);
 
   const stats = [
@@ -159,19 +122,20 @@ export default function OtSchedulingPage() {
     {
       label: "Confirmed slots",
       value: filteredBookings.filter(
-        (item) => item.status === "Confirmed"
+        (booking) => booking.status === "Confirmed"
       ).length,
     },
     {
-      label: "Pre-op incomplete",
-      value: filteredBookings.filter(
-        (item) => !item.checklistComplete
-      ).length,
+      label: "Pre-op checks remaining",
+      value: filteredBookings.reduce((total, booking) => {
+        const progress = getChecklistProgress(booking);
+        return total + progress.total - progress.completed;
+      }, 0),
     },
     {
       label: "Insurance pending",
       value: filteredBookings.filter(
-        (item) => item.insuranceStatus === "Pending"
+        (booking) => booking.insuranceStatus === "Pending"
       ).length,
     },
   ];
@@ -182,6 +146,7 @@ export default function OtSchedulingPage() {
       ...emptyForm,
       date: dateFilter || today,
     });
+    setNotice("");
     setModalOpen(true);
   };
 
@@ -196,93 +161,119 @@ export default function OtSchedulingPage() {
       procedure: booking.procedure,
       surgeon: booking.surgeon,
       date: booking.date,
-      time: booking.time,
+      time: toTimeInput(booking.time),
       duration: String(booking.duration),
       otRoom: booking.otRoom,
       insuranceStatus: booking.insuranceStatus,
       notes: booking.notes || "",
     });
 
+    setNotice("");
     setModalOpen(true);
   };
 
   const updateForm = (event) => {
+    const { name, value } = event.target;
+
     setForm((current) => ({
       ...current,
-      [event.target.name]: event.target.value,
+      [name]: value,
     }));
   };
 
   const saveBooking = (event) => {
     event.preventDefault();
 
-    const timeLabel =
-      form.time.includes("AM") || form.time.includes("PM")
-        ? form.time
-        : new Date(
-            `2000-01-01T${form.time}:00`
-          ).toLocaleTimeString("en-IN", {
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: true,
-          });
+    if (Number(form.age) <= 0 || Number(form.duration) <= 0) {
+      setNotice("Enter a valid patient age and procedure duration.");
+      return;
+    }
+
+    const startMinutes = Number(form.time.split(":")[0]) * 60 +
+      Number(form.time.split(":")[1]);
+    const endMinutes = startMinutes + Number(form.duration);
+
+    const hasConflict = bookings.some((booking) => {
+      if (booking.id === editingId) return false;
+      if (booking.date !== form.date || booking.otRoom !== form.otRoom) {
+        return false;
+      }
+
+      const existingStart = toMinutes(booking.time);
+      const existingEnd = existingStart + Number(booking.duration);
+
+      return (
+        startMinutes < existingEnd &&
+        endMinutes > existingStart
+      );
+    });
+
+    if (hasConflict) {
+      setNotice(
+        "This theatre already has a booking during the selected time."
+      );
+      return;
+    }
 
     const bookingData = {
-      ...form,
+      patientName: form.patientName.trim(),
+      patientId: form.patientId.trim(),
       age: Number(form.age),
+      gender: form.gender,
+      procedure: form.procedure.trim(),
+      surgeon: form.surgeon.trim(),
+      date: form.date,
+      time: toTimeLabel(form.time),
       duration: Number(form.duration),
-      time: timeLabel,
-      status: "Pending",
+      otRoom: form.otRoom,
+      insuranceStatus: form.insuranceStatus,
+      notes: form.notes.trim(),
     };
 
     if (editingId) {
-      setBookings((current) =>
+      updateBookings((current) =>
         current.map((booking) =>
           booking.id === editingId
-            ? {
-                ...booking,
-                ...bookingData,
-                checklistComplete:
-                  booking.date === form.date
-                    ? booking.checklistComplete
-                    : false,
-              }
+            ? { ...booking, ...bookingData }
             : booking
         )
       );
 
       setNotice("OT booking updated.");
     } else {
-      const id = `OT-${String(Date.now()).slice(-6)}`;
+      const newBooking = {
+        ...bookingData,
+        id: `OT-${String(Date.now()).slice(-6)}`,
+        status: "Pending",
+        checklistItems: {},
+      };
 
-      setBookings((current) => [
-        ...current,
-        {
-          ...bookingData,
-          id,
-          checklistComplete: false,
-        },
-      ]);
-
+      updateBookings((current) => [...current, newBooking]);
       setNotice(
-        "OT booking created. Complete the pre-op checklist before confirming the slot."
+        "Booking added for this session. Complete the pre-op checklist before confirming the OT slot."
       );
     }
 
+    setDateFilter(form.date);
     setModalOpen(false);
   };
 
   const confirmBooking = (id) => {
     const booking = bookings.find((item) => item.id === id);
+    if (!booking) return;
 
-    if (!booking?.checklistComplete) {
+    if (!getChecklistProgress(booking).isComplete) {
       setNotice(
-        "Complete every required pre-op item before confirming this OT slot."
+        "Complete all 10 required pre-operative checks before confirming this OT slot."
+      );
+
+      navigate(
+        `/staff/departments/surgery/pre-op-checklist?booking=${encodeURIComponent(id)}`
       );
       return;
     }
 
-    setBookings((current) =>
+    updateBookings((current) =>
       current.map((item) =>
         item.id === id
           ? { ...item, status: "Confirmed" }
@@ -297,14 +288,7 @@ export default function OtSchedulingPage() {
     <div className="surgery-page">
       <header className="surgery-header">
         <div>
-          <p className="surgery-eyebrow">
-            DEPARTMENT MODULE · SURGERY
-          </p>
           <h1>OT Scheduling</h1>
-          <p>
-            Schedule operation theatres, review pre-operative
-            readiness and track insurance pre-authorisation.
-          </p>
         </div>
 
         <button
@@ -329,10 +313,7 @@ export default function OtSchedulingPage() {
         </div>
       )}
 
-      <section
-        className="surgery-stats"
-        aria-label="OT booking summary"
-      >
+      <section className="surgery-stats" aria-label="OT booking summary">
         {stats.map((stat) => (
           <div className="surgery-stat" key={stat.label}>
             <span>{stat.label}</span>
@@ -345,22 +326,7 @@ export default function OtSchedulingPage() {
         <div className="surgery-panel-header">
           <div>
             <h2>Operation theatre schedule</h2>
-            <p>
-              Search bookings and filter by date, status or OT room.
-            </p>
           </div>
-
-          <button
-            type="button"
-            className="surgery-secondary-button"
-            onClick={() =>
-              navigate(
-                "/staff/departments/surgery/pre-op-checklist"
-              )
-            }
-          >
-            Open pre-op checklist
-          </button>
         </div>
 
         <div className="surgery-toolbar">
@@ -369,9 +335,7 @@ export default function OtSchedulingPage() {
             <input
               type="date"
               value={dateFilter}
-              onChange={(event) =>
-                setDateFilter(event.target.value)
-              }
+              onChange={(event) => setDateFilter(event.target.value)}
             />
           </label>
 
@@ -389,9 +353,7 @@ export default function OtSchedulingPage() {
             Booking status
             <select
               value={statusFilter}
-              onChange={(event) =>
-                setStatusFilter(event.target.value)
-              }
+              onChange={(event) => setStatusFilter(event.target.value)}
             >
               <option>All statuses</option>
               <option>Pending</option>
@@ -403,9 +365,7 @@ export default function OtSchedulingPage() {
             Operation theatre
             <select
               value={roomFilter}
-              onChange={(event) =>
-                setRoomFilter(event.target.value)
-              }
+              onChange={(event) => setRoomFilter(event.target.value)}
             >
               <option>All OTs</option>
               <option>OT-1</option>
@@ -432,8 +392,7 @@ export default function OtSchedulingPage() {
             ))
           ) : (
             <p className="surgery-empty">
-              No OT bookings match these filters. Try another date
-              or create a new booking.
+              No OT bookings match these filters. Try another date or create a new booking.
             </p>
           )}
         </div>
@@ -459,13 +418,9 @@ export default function OtSchedulingPage() {
               <div>
                 <p className="surgery-eyebrow">OT MANAGEMENT</p>
                 <h2 id="surgery-booking-modal-title">
-                  {editingId
-                    ? "Edit OT booking"
-                    : "New OT booking"}
+                  {editingId ? "Edit OT booking" : "New OT booking"}
                 </h2>
-                <p>
-                  Enter the patient, procedure and theatre details.
-                </p>
+            
               </div>
 
               <button
@@ -481,7 +436,7 @@ export default function OtSchedulingPage() {
             <form onSubmit={saveBooking}>
               <div className="surgery-form-grid">
                 <label className="surgery-field">
-                  Patient name
+                  Patient name *
                   <input
                     name="patientName"
                     value={form.patientName}
@@ -491,7 +446,7 @@ export default function OtSchedulingPage() {
                 </label>
 
                 <label className="surgery-field">
-                  Patient ID
+                  Patient ID *
                   <input
                     name="patientId"
                     value={form.patientId}
@@ -501,11 +456,11 @@ export default function OtSchedulingPage() {
                 </label>
 
                 <label className="surgery-field">
-                  Age
+                  Age *
                   <input
                     name="age"
                     type="number"
-                    min="0"
+                    min="1"
                     max="120"
                     value={form.age}
                     onChange={updateForm}
@@ -514,7 +469,7 @@ export default function OtSchedulingPage() {
                 </label>
 
                 <label className="surgery-field">
-                  Gender
+                  Gender *
                   <select
                     name="gender"
                     value={form.gender}
@@ -530,7 +485,7 @@ export default function OtSchedulingPage() {
                 </label>
 
                 <label className="surgery-field surgery-field-full">
-                  Procedure
+                  Procedure *
                   <input
                     name="procedure"
                     value={form.procedure}
@@ -540,7 +495,7 @@ export default function OtSchedulingPage() {
                 </label>
 
                 <label className="surgery-field">
-                  Surgeon
+                  Surgeon *
                   <input
                     name="surgeon"
                     value={form.surgeon}
@@ -550,11 +505,12 @@ export default function OtSchedulingPage() {
                 </label>
 
                 <label className="surgery-field">
-                  OT room
+                  OT room *
                   <select
                     name="otRoom"
                     value={form.otRoom}
                     onChange={updateForm}
+                    required
                   >
                     <option>OT-1</option>
                     <option>OT-2</option>
@@ -563,7 +519,7 @@ export default function OtSchedulingPage() {
                 </label>
 
                 <label className="surgery-field">
-                  Date
+                  Date *
                   <input
                     name="date"
                     type="date"
@@ -575,7 +531,7 @@ export default function OtSchedulingPage() {
                 </label>
 
                 <label className="surgery-field">
-                  Start time
+                  Start time *
                   <input
                     name="time"
                     type="time"
@@ -586,7 +542,7 @@ export default function OtSchedulingPage() {
                 </label>
 
                 <label className="surgery-field">
-                  Duration (minutes)
+                  Duration (minutes) *
                   <input
                     name="duration"
                     type="number"
@@ -599,11 +555,12 @@ export default function OtSchedulingPage() {
                 </label>
 
                 <label className="surgery-field">
-                  Insurance pre-authorisation
+                  Insurance pre-authorisation *
                   <select
                     name="insuranceStatus"
                     value={form.insuranceStatus}
                     onChange={updateForm}
+                    required
                   >
                     <option>Pending</option>
                     <option>Approved</option>
@@ -642,7 +599,7 @@ export default function OtSchedulingPage() {
                   type="submit"
                   className="surgery-primary-button"
                 >
-                  Save booking
+                  {editingId ? "Save changes" : "Create booking"}
                 </button>
               </div>
             </form>

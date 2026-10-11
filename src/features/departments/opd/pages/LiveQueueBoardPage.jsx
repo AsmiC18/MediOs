@@ -1,862 +1,511 @@
 import { useMemo, useState } from "react";
 import QueueTokenCard from "../components/QueueTokenCard";
 
-const PRIORITY_RANK = {
-  emergency: 3,
-  priority: 2,
-  normal: 1,
-};
-
-const PRIORITY_GROUPS = [
-  {
-    key: "emergency",
-    label: "EMERGENCY",
-  },
-  {
-    key: "priority",
-    label: "PRIORITY",
-  },
-  {
-    key: "normal",
-    label: "NORMAL",
-  },
-];
-
 const initialQueue = [
   {
     id: 1,
     patientName: "Ravi Kumar",
-    description: "Chest discomfort and dizziness",
-    arrivalTime: "09:02 AM",
-    arrivalMinutes: 542,
+    description: "Chest pain",
     priority: "emergency",
     status: "waiting",
-    manualOrder: 0,
+    arrivalTime: "09:10 AM",
+    manualOrder: 1,
   },
   {
     id: 2,
     patientName: "Priya Sharma",
-    description: "Severe abdominal pain",
-    arrivalTime: "09:08 AM",
-    arrivalMinutes: 548,
+    description: "Breathing difficulty",
     priority: "emergency",
     status: "waiting",
-    manualOrder: 1,
+    arrivalTime: "09:15 AM",
+    manualOrder: 2,
   },
   {
     id: 3,
     patientName: "Arun Kumar",
-    description: "High fever and weakness",
-    arrivalTime: "09:12 AM",
-    arrivalMinutes: 552,
-    priority: "priority",
+    description: "Fever and headache",
+    priority: "normal",
     status: "waiting",
-    manualOrder: 0,
+    arrivalTime: "09:20 AM",
+    manualOrder: 1,
   },
   {
     id: 4,
     patientName: "Meena Devi",
-    description: "Persistent headache",
-    arrivalTime: "09:18 AM",
-    arrivalMinutes: 558,
-    priority: "priority",
+    description: "Follow-up consultation",
+    priority: "normal",
     status: "waiting",
-    manualOrder: 1,
+    arrivalTime: "09:25 AM",
+    manualOrder: 2,
   },
   {
     id: 5,
     patientName: "Karthik Raj",
-    description: "Knee pain after injury",
-    arrivalTime: "09:20 AM",
-    arrivalMinutes: 560,
+    description: "Stomach pain",
     priority: "normal",
     status: "waiting",
-    manualOrder: 0,
+    arrivalTime: "09:30 AM",
+    manualOrder: 3,
   },
   {
     id: 6,
     patientName: "Lakshmi",
-    description: "Routine diabetes follow-up",
-    arrivalTime: "09:25 AM",
-    arrivalMinutes: 565,
+    description: "Headache",
     priority: "normal",
     status: "waiting",
-    manualOrder: 1,
+    arrivalTime: "09:35 AM",
+    manualOrder: 4,
   },
   {
     id: 7,
     patientName: "Suresh Kumar",
-    description: "Back pain for three days",
-    arrivalTime: "09:31 AM",
-    arrivalMinutes: 571,
+    description: "General consultation",
     priority: "normal",
     status: "called",
-    manualOrder: 2,
+    arrivalTime: "09:00 AM",
+    manualOrder: 5,
   },
 ];
 
-function sortPatients(patients) {
+function sortQueue(patients) {
   return [...patients].sort((a, b) => {
-    if (
-      PRIORITY_RANK[a.priority] !==
-      PRIORITY_RANK[b.priority]
-    ) {
-      return (
-        PRIORITY_RANK[b.priority] -
-        PRIORITY_RANK[a.priority]
-      );
+    if (a.priority !== b.priority) {
+      return a.priority === "emergency" ? -1 : 1;
     }
 
-    if (a.manualOrder !== b.manualOrder) {
-      return a.manualOrder - b.manualOrder;
-    }
-
-    return a.arrivalMinutes - b.arrivalMinutes;
+    return a.manualOrder - b.manualOrder;
   });
 }
 
-function normalizeOrders(patients, priority) {
-  return patients
-    .filter((patient) => patient.priority === priority)
-    .sort((a, b) => {
-      if (a.manualOrder !== b.manualOrder) {
-        return a.manualOrder - b.manualOrder;
-      }
-
-      return a.arrivalMinutes - b.arrivalMinutes;
-    })
-    .map((patient, index) => ({
-      ...patient,
-      manualOrder: index,
-    }));
+function matchesSearch(patient, term) {
+  return (
+    patient.patientName.toLowerCase().includes(term) ||
+    patient.description.toLowerCase().includes(term)
+  );
 }
 
 export default function LiveQueueBoardPage() {
-  const [queue, setQueue] = useState(() =>
-    sortPatients(initialQueue)
-  );
+  const [patients, setPatients] = useState(initialQueue);
+  const [search, setSearch] = useState("");
+  const [editingPatient, setEditingPatient] = useState(null);
+  const [draggedId, setDraggedId] = useState(null);
+  const [dragOverId, setDragOverId] = useState(null);
 
-  const [searchTerm, setSearchTerm] = useState("");
+  const orderedPatients = useMemo(() => sortQueue(patients), [patients]);
 
-  const [draggedPatientId, setDraggedPatientId] =
-    useState(null);
-
-  const [dragOverPatientId, setDragOverPatientId] =
-    useState(null);
-
-  const [editingPatient, setEditingPatient] =
-    useState(null);
-
-  const [editForm, setEditForm] = useState({
-    patientName: "",
-    description: "",
-    priority: "normal",
-  });
+  const searchTerm = search.trim().toLowerCase();
 
   const waitingPatients = useMemo(
     () =>
-      queue.filter(
-        (patient) => patient.status === "waiting"
+      orderedPatients.filter(
+        (patient) =>
+          patient.status === "waiting" &&
+          matchesSearch(patient, searchTerm)
       ),
-    [queue]
+    [orderedPatients, searchTerm]
   );
 
   const calledPatients = useMemo(
     () =>
-      queue.filter(
-        (patient) => patient.status === "called"
+      orderedPatients.filter(
+        (patient) =>
+          patient.status === "called" &&
+          matchesSearch(patient, searchTerm)
       ),
-    [queue]
+    [orderedPatients, searchTerm]
   );
 
-  const consultingPatients = useMemo(
-    () =>
-      queue.filter(
-        (patient) => patient.status === "consulting"
-      ),
-    [queue]
-  );
+  const waitingCount = patients.filter(
+    (patient) => patient.status === "waiting"
+  ).length;
 
-  const completedPatients = useMemo(
-    () =>
-      queue.filter(
-        (patient) => patient.status === "completed"
-      ),
-    [queue]
-  );
+  const emergencyCount = patients.filter(
+    (patient) =>
+      patient.status === "waiting" && patient.priority === "emergency"
+  ).length;
 
-  const filteredWaitingPatients = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
+  const calledCount = patients.filter(
+    (patient) => patient.status === "called"
+  ).length;
 
-    if (!term) {
-      return waitingPatients;
-    }
+  const consultingCount = patients.filter(
+    (patient) => patient.status === "consulting"
+  ).length;
 
-    return waitingPatients.filter(
-      (patient) =>
-        patient.patientName
-          .toLowerCase()
-          .includes(term) ||
-        patient.description
-          .toLowerCase()
-          .includes(term)
-    );
-  }, [waitingPatients, searchTerm]);
-
-  const priorityGroups = useMemo(() => {
-    return PRIORITY_GROUPS.map((group) => ({
-      ...group,
-
-      patients: filteredWaitingPatients
-        .filter(
-          (patient) =>
-            patient.priority === group.key
-        )
-        .sort((a, b) => {
-          if (a.manualOrder !== b.manualOrder) {
-            return (
-              a.manualOrder - b.manualOrder
-            );
-          }
-
-          return (
-            a.arrivalMinutes - b.arrivalMinutes
-          );
-        }),
-    }));
-  }, [filteredWaitingPatients]);
-
-  /* =========================
-     CALL PATIENT
-  ========================= */
-
-  const handleCallPatient = (patient) => {
-    setQueue((currentQueue) =>
-      currentQueue.map((item) =>
-        item.id === patient.id
-          ? {
-              ...item,
-              status: "called",
-            }
-          : item
+  function handleCall(patient) {
+    setPatients((current) =>
+      current.map((item) =>
+        item.id === patient.id ? { ...item, status: "called" } : item
       )
     );
-  };
+  }
 
-  /* =========================
-     EDIT PATIENT
-  ========================= */
+  function handleEditSave(event) {
+    event.preventDefault();
 
-  const handleEditPatient = (patient) => {
-    setEditingPatient(patient);
+    if (!editingPatient) return;
 
-    setEditForm({
-      patientName: patient.patientName,
-      description: patient.description,
-      priority: patient.priority,
-    });
-  };
+    const name = editingPatient.patientName.trim();
+    const description = editingPatient.description.trim();
 
-  const handleSaveEdit = () => {
-    if (!editingPatient) {
-      return;
-    }
+    if (!name || !description) return;
 
-    const trimmedName =
-      editForm.patientName.trim();
+    const original = patients.find(
+      (patient) => patient.id === editingPatient.id
+    );
 
-    const trimmedDescription =
-      editForm.description.trim();
+    if (!original) return;
 
-    if (!trimmedName) {
-      return;
-    }
+    const newPriority = editingPatient.priority;
 
-    setQueue((currentQueue) => {
-      const priorityChanged =
-        editingPatient.priority !==
-        editForm.priority;
+    // if (
+    //   original.priority !== "emergency" &&
+    //   newPriority === "emergency" &&
+    //   !window.confirm(
+    //     "Change this patient to Emergency? They will move to the Emergency group at the top of the waiting queue."
+    //   )
+    // ) {
+    //   return;
+    // }
 
-      let updatedQueue = currentQueue.map(
-        (patient) =>
-          patient.id === editingPatient.id
-            ? {
-                ...patient,
-                patientName: trimmedName,
-                description: trimmedDescription,
-                priority: editForm.priority,
-                manualOrder: priorityChanged
-                  ? 999
-                  : patient.manualOrder,
-              }
-            : patient
-      );
+    setPatients((current) => {
+      const updated = current.map((patient) => {
+        if (patient.id !== editingPatient.id) return patient;
 
-      /*
-       * If priority changes, put the patient
-       * into the new priority group and
-       * normalize that group's ordering.
-       */
-      if (priorityChanged) {
-        updatedQueue = normalizeOrders(
-          updatedQueue,
-          editForm.priority
-        );
-      }
+        return {
+          ...patient,
+          patientName: name,
+          description,
+          priority: newPriority,
+          manualOrder:
+            patient.priority === newPriority
+              ? patient.manualOrder
+              : Date.now(),
+        };
+      });
 
-      return sortPatients(updatedQueue);
+      const emergency = sortQueue(
+        updated.filter((patient) => patient.priority === "emergency")
+      ).map((patient, index) => ({
+        ...patient,
+        manualOrder: index + 1,
+      }));
+
+      const normal = sortQueue(
+        updated.filter((patient) => patient.priority === "normal")
+      ).map((patient, index) => ({
+        ...patient,
+        manualOrder: index + 1,
+      }));
+
+      return [...emergency, ...normal];
     });
 
     setEditingPatient(null);
-  };
+  }
 
-  /* =========================
-     DRAG START
-  ========================= */
-
-  const handleDragStart = (event, patient) => {
+  function handleDragStart(event, patient) {
     if (patient.status !== "waiting") {
+      event.preventDefault();
       return;
     }
 
-    setDraggedPatientId(patient.id);
-
+    setDraggedId(patient.id);
     event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(patient.id));
+  }
 
-    event.dataTransfer.setData(
-      "text/plain",
-      String(patient.id)
-    );
-  };
-
-  /* =========================
-     DRAG OVER
-  ========================= */
-
-  const handleDragOver = (event, patient) => {
+  function handleDragOver(event, targetPatient) {
     event.preventDefault();
 
     if (
-      draggedPatientId === null ||
-      patient.status !== "waiting"
-    ) {
-      return;
-    }
-
-    const draggedPatient = queue.find(
-      (item) => item.id === draggedPatientId
-    );
-
-    if (!draggedPatient) {
-      return;
-    }
-
-    /*
-     * A patient cannot cross a priority boundary.
-     *
-     * Emergency stays Emergency.
-     * Priority stays Priority.
-     * Normal stays Normal.
-     */
-    if (
-      draggedPatient.priority !==
-      patient.priority
-    ) {
-      event.dataTransfer.dropEffect = "none";
-
-      setDragOverPatientId(null);
-
-      return;
-    }
-
-    event.dataTransfer.dropEffect = "move";
-
-    setDragOverPatientId(patient.id);
-  };
-
-  /* =========================
-     DROP
-  ========================= */
-
-  const handleDrop = (event, targetPatient) => {
-    event.preventDefault();
-
-    if (
-      draggedPatientId === null ||
+      draggedId === null ||
+      draggedId === targetPatient.id ||
       targetPatient.status !== "waiting"
     ) {
       return;
     }
 
-    const draggedPatient = queue.find(
-      (item) => item.id === draggedPatientId
+    const draggedPatient = patients.find(
+      (patient) => patient.id === draggedId
     );
 
-    if (!draggedPatient) {
-      return;
-    }
-
-    /*
-     * Do not allow a patient to be
-     * dragged into another priority.
-     */
     if (
-      draggedPatient.priority !==
-      targetPatient.priority
+      !draggedPatient ||
+      draggedPatient.priority !== targetPatient.priority
     ) {
-      setDraggedPatientId(null);
-      setDragOverPatientId(null);
-
+      event.dataTransfer.dropEffect = "none";
+      setDragOverId(null);
       return;
     }
 
-    const priority =
-      draggedPatient.priority;
+    event.dataTransfer.dropEffect = "move";
+    setDragOverId(targetPatient.id);
+  }
 
-    const priorityPatients = queue
-      .filter(
-        (patient) =>
-          patient.priority === priority &&
-          patient.status === "waiting"
-      )
-      .sort((a, b) => {
-        if (a.manualOrder !== b.manualOrder) {
-          return (
-            a.manualOrder - b.manualOrder
-          );
-        }
+  function handleDrop(event, targetPatient) {
+    event.preventDefault();
 
-        return (
-          a.arrivalMinutes -
-          b.arrivalMinutes
-        );
-      });
+    const sourceId = draggedId;
+    setDragOverId(null);
 
-    const draggedIndex =
-      priorityPatients.findIndex(
-        (patient) =>
-          patient.id === draggedPatientId
-      );
-
-    const targetIndex =
-      priorityPatients.findIndex(
-        (patient) =>
-          patient.id === targetPatient.id
-      );
-
-    if (
-      draggedIndex === -1 ||
-      targetIndex === -1 ||
-      draggedIndex === targetIndex
-    ) {
-      setDraggedPatientId(null);
-      setDragOverPatientId(null);
-
+    if (sourceId === null || sourceId === targetPatient.id) {
+      setDraggedId(null);
       return;
     }
 
-    const reorderedPatients = [
-      ...priorityPatients,
-    ];
-
-    const [removedPatient] =
-      reorderedPatients.splice(
-        draggedIndex,
-        1
+    setPatients((current) => {
+      const source = current.find((patient) => patient.id === sourceId);
+      const target = current.find(
+        (patient) => patient.id === targetPatient.id
       );
 
-    reorderedPatients.splice(
-      targetIndex,
-      0,
-      removedPatient
-    );
+      if (
+        !source ||
+        !target ||
+        source.status !== "waiting" ||
+        target.status !== "waiting" ||
+        source.priority !== target.priority
+      ) {
+        return current;
+      }
 
-    const updatedOrders =
-      reorderedPatients.map(
-        (patient, index) => ({
-          ...patient,
-          manualOrder: index,
-        })
+      const categoryPatients = sortQueue(
+        current.filter(
+          (patient) =>
+            patient.priority === source.priority &&
+            patient.status === "waiting"
+        )
       );
 
-    setQueue((currentQueue) => {
-      const updatedQueue =
-        currentQueue.map((patient) => {
-          const updatedPatient =
-            updatedOrders.find(
-              (item) =>
-                item.id === patient.id
-            );
+      const fromIndex = categoryPatients.findIndex(
+        (patient) => patient.id === sourceId
+      );
+      const toIndex = categoryPatients.findIndex(
+        (patient) => patient.id === targetPatient.id
+      );
 
-          return (
-            updatedPatient || patient
-          );
-        });
+      if (fromIndex < 0 || toIndex < 0) return current;
 
-      return sortPatients(updatedQueue);
+      const reordered = [...categoryPatients];
+      const [moved] = reordered.splice(fromIndex, 1);
+      reordered.splice(toIndex, 0, moved);
+
+      const updatedCategory = reordered.map((patient, index) => ({
+        ...patient,
+        manualOrder: index + 1,
+      }));
+
+      const categoryIds = new Set(
+        categoryPatients.map((patient) => patient.id)
+      );
+
+      return [
+        ...current.filter((patient) => !categoryIds.has(patient.id)),
+        ...updatedCategory,
+      ];
     });
 
-    setDraggedPatientId(null);
-    setDragOverPatientId(null);
-  };
+    setDraggedId(null);
+  }
 
-  /* =========================
-     DRAG END
-  ========================= */
+  function handleDragEnd() {
+    setDraggedId(null);
+    setDragOverId(null);
+  }
 
-  const handleDragEnd = () => {
-    setDraggedPatientId(null);
-    setDragOverPatientId(null);
-  };
+  function openEdit(patient) {
+    setEditingPatient({ ...patient });
+  }
+
+  function renderPatientCard(patient) {
+    return (
+      <QueueTokenCard
+        key={patient.id}
+        patient={patient}
+        onCall={handleCall}
+        onEdit={openEdit}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+        onDragEnd={handleDragEnd}
+        isDragging={draggedId === patient.id}
+        isDragOver={dragOverId === patient.id}
+      />
+    );
+  }
 
   return (
     <div className="opd-page">
-      {/* =========================
-          HEADER
-      ========================= */}
-
       <div className="opd-page-header">
         <div>
-          <h1>OPD Queue</h1>
-
-          <p>
-            Manage the live outpatient queue
-            and patient flow.
-          </p>
-        </div>
-
-        <div className="opd-header-note">
-          Drag patients to reorder within
-          the same priority.
+          <h1>Live Queue Board</h1>
+          <p>Manage patient flow and consultation order.</p>
         </div>
       </div>
 
-      {/* =========================
-          STATS
-      ========================= */}
-
-      <div className="opd-stats-grid">
+      <div className="opd-stats">
         <div className="opd-stat-card">
-          <span className="opd-stat-label">
-            Waiting
-          </span>
-
-          <strong>
-            {waitingPatients.length}
-          </strong>
+          <span>Waiting</span>
+          <strong>{waitingCount}</strong>
         </div>
 
         <div className="opd-stat-card">
-          <span className="opd-stat-label">
-            Called
-          </span>
-
-          <strong>
-            {calledPatients.length}
-          </strong>
+          <span>Emergency</span>
+          <strong>{emergencyCount}</strong>
         </div>
 
         <div className="opd-stat-card">
-          <span className="opd-stat-label">
-            In Consultation
-          </span>
-
-          <strong>
-            {consultingPatients.length}
-          </strong>
+          <span>Called</span>
+          <strong>{calledCount}</strong>
         </div>
 
         <div className="opd-stat-card">
-          <span className="opd-stat-label">
-            Completed
-          </span>
-
-          <strong>
-            {completedPatients.length}
-          </strong>
+          <span>In Consultation</span>
+          <strong>{consultingCount}</strong>
         </div>
       </div>
 
-      {/* =========================
-          SEARCH
-      ========================= */}
+      <div className="opd-queue-toolbar">
+        <input
+          type="search"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search patients..."
+          aria-label="Search patients"
+        />
 
-      <div className="opd-toolbar">
-        <div className="opd-search-wrapper">
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(event) =>
-              setSearchTerm(
-                event.target.value
-              )
-            }
-            placeholder="Search patient..."
-            className="opd-search-input"
-          />
-        </div>
-
-        <div className="opd-queue-count">
-          {filteredWaitingPatients.length}{" "}
-          patients waiting
-        </div>
+        <span className="opd-queue-count">
+          {waitingPatients.length} waiting · {calledPatients.length} called
+        </span>
       </div>
 
-      {/* =========================
-          PRIORITY QUEUES
-      ========================= */}
-
-      <div className="opd-queue-board">
-        {priorityGroups.map((group) => (
-          <section
-            key={group.key}
-            className="opd-priority-section"
-          >
-            <div
-              className={`opd-priority-label ${group.key}`}
-            >
-              {group.label}
-            </div>
-
-            <div className="opd-queue-list">
-              {group.patients.length > 0 ? (
-                group.patients.map(
-                  (patient) => (
-                    <QueueTokenCard
-                      key={patient.id}
-                      patient={patient}
-                      onCall={
-                        handleCallPatient
-                      }
-                      onEdit={
-                        handleEditPatient
-                      }
-                      onDragStart={
-                        handleDragStart
-                      }
-                      onDragOver={
-                        handleDragOver
-                      }
-                      onDrop={handleDrop}
-                      onDragEnd={
-                        handleDragEnd
-                      }
-                      isDragging={
-                        draggedPatientId ===
-                        patient.id
-                      }
-                      isDragOver={
-                        dragOverPatientId ===
-                        patient.id
-                      }
-                    />
-                  )
-                )
-              ) : (
-                <div className="opd-empty-queue">
-                  No patients in this queue
-                </div>
-              )}
-            </div>
-          </section>
-        ))}
-      </div>
-
-      {/* =========================
-          ACTIVE OPD FLOW
-      ========================= */}
-
-      {(calledPatients.length > 0 ||
-        consultingPatients.length > 0) && (
-        <section className="opd-active-section">
-          <div className="opd-section-heading">
-            <div>
-              <h2>Active OPD Flow</h2>
-
-              <p>
-                Patients who have been called
-                or are currently in
-                consultation.
-              </p>
-            </div>
+      <div className="opd-queue-sections">
+        <section className="opd-queue-section">
+          <div className="opd-queue-section-heading">
+            <h2>Waiting Queue</h2>
+            <span>{waitingPatients.length}</span>
           </div>
 
-          <div className="opd-active-list">
-            {calledPatients.map(
-              (patient) => (
-                <div
-                  key={patient.id}
-                  className="opd-active-row"
-                >
-                  <div>
-                    <strong>
-                      {patient.patientName}
-                    </strong>
-
-                    <span>
-                      {patient.description}
-                    </span>
-                  </div>
-
-                  <span className="opd-flow-status called">
-                    Called
-                  </span>
-                </div>
-              )
-            )}
-
-            {consultingPatients.map(
-              (patient) => (
-                <div
-                  key={patient.id}
-                  className="opd-active-row"
-                >
-                  <div>
-                    <strong>
-                      {patient.patientName}
-                    </strong>
-
-                    <span>
-                      {patient.description}
-                    </span>
-                  </div>
-
-                  <span className="opd-flow-status consulting">
-                    In Consultation
-                  </span>
-                </div>
-              )
+          <div className="opd-unified-queue">
+            {waitingPatients.length === 0 ? (
+              <div className="opd-empty-queue">No patients waiting.</div>
+            ) : (
+              waitingPatients.map(renderPatientCard)
             )}
           </div>
         </section>
-      )}
 
-      {/* =========================
-          EDIT PATIENT MODAL
-      ========================= */}
+        <section className="opd-queue-section">
+          <div className="opd-queue-section-heading">
+            <h2>Called Patients</h2>
+            <span>{calledPatients.length}</span>
+          </div>
+
+          <div className="opd-unified-queue called-queue">
+            {calledPatients.length === 0 ? (
+              <div className="opd-empty-queue">
+                No patients have been called yet.
+              </div>
+            ) : (
+              calledPatients.map(renderPatientCard)
+            )}
+          </div>
+        </section>
+      </div>
 
       {editingPatient && (
         <div
           className="opd-modal-overlay"
-          onClick={() =>
-            setEditingPatient(null)
-          }
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setEditingPatient(null);
+            }
+          }}
         >
           <div
             className="opd-edit-modal"
-            onClick={(event) =>
-              event.stopPropagation()
-            }
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="opd-edit-title"
           >
             <div className="opd-modal-header">
               <div>
-                <h2>
-                  Edit Patient Queue
-                </h2>
-
-                <p>
-                  Update patient details or
-                  clinical priority.
-                </p>
+                <h2 id="opd-edit-title">Edit Patient</h2>
+                <p>Update patient details and priority.</p>
               </div>
 
               <button
                 type="button"
                 className="opd-modal-close"
-                onClick={() =>
-                  setEditingPatient(null)
-                }
+                onClick={() => setEditingPatient(null)}
+                aria-label="Close edit form"
               >
                 ×
               </button>
             </div>
 
-            <div className="opd-edit-form">
+            <form className="opd-edit-form" onSubmit={handleEditSave}>
               <label>
-                Patient Name
-
+                Patient name
                 <input
                   type="text"
-                  value={
-                    editForm.patientName
-                  }
+                  value={editingPatient.patientName}
                   onChange={(event) =>
-                    setEditForm({
-                      ...editForm,
-                      patientName:
-                        event.target.value,
-                    })
+                    setEditingPatient((current) => ({
+                      ...current,
+                      patientName: event.target.value,
+                    }))
                   }
+                  required
                 />
               </label>
 
               <label>
-                Description
-
-                <textarea
-                  rows="3"
-                  value={
-                    editForm.description
-                  }
+                Complaint
+                <input
+                  type="text"
+                  value={editingPatient.description}
                   onChange={(event) =>
-                    setEditForm({
-                      ...editForm,
-                      description:
-                        event.target.value,
-                    })
+                    setEditingPatient((current) => ({
+                      ...current,
+                      description: event.target.value,
+                    }))
                   }
+                  required
                 />
               </label>
 
               <label>
                 Priority
-
                 <select
-                  value={
-                    editForm.priority
-                  }
+                  value={editingPatient.priority}
                   onChange={(event) =>
-                    setEditForm({
-                      ...editForm,
-                      priority:
-                        event.target.value,
-                    })
+                    setEditingPatient((current) => ({
+                      ...current,
+                      priority: event.target.value,
+                    }))
                   }
                 >
-                  <option value="emergency">
-                    Emergency
-                  </option>
-
-                  <option value="priority">
-                    Priority
-                  </option>
-
-                  <option value="normal">
-                    Normal
-                  </option>
+                  <option value="normal">Normal</option>
+                  <option value="emergency">Emergency</option>
                 </select>
               </label>
-            </div>
 
-            <div className="opd-modal-actions">
-              <button
-                type="button"
-                className="opd-cancel-button"
-                onClick={() =>
-                  setEditingPatient(null)
-                }
-              >
-                Cancel
-              </button>
+              <div className="opd-modal-actions">
+                <button
+                  type="button"
+                  className="opd-cancel-button"
+                  onClick={() => setEditingPatient(null)}
+                >
+                  Cancel
+                </button>
 
-              <button
-                type="button"
-                className="opd-save-button"
-                onClick={handleSaveEdit}
-              >
-                Save Changes
-              </button>
-            </div>
+                <button type="submit" className="opd-save-button">
+                  Save Changes
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

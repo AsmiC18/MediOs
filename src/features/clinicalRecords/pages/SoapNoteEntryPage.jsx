@@ -1,6 +1,13 @@
-
-import React, { useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+
+import AttachmentUpload from "../components/AttachmentUpload";
+import Icd10Lookup from "../components/Icd10Lookup";
+import SoapFields from "../components/SoapFields";
+import {
+  addClinicalNote,
+  useClinicalNotes,
+} from "../clinicalNotesStore";
 
 
 const emptyNote = {
@@ -12,24 +19,39 @@ const emptyNote = {
   plan: "",
 };
 
-const SoapNoteEntryPage = () => {
+const soapSections = [
+  { key: "subjective", label: "Subjective" },
+  { key: "objective", label: "Objective" },
+  { key: "assessment", label: "Assessment" },
+  { key: "plan", label: "Plan" },
+];
+
+export default function SoapNoteEntryPage() {
   const navigate = useNavigate();
+  const savedNotes = useClinicalNotes();
 
-  const [note, setNote] = useState(emptyNote);
-  const [savedNote, setSavedNote] = useState(null);
+  const [note, setNote] = useState({ ...emptyNote });
+  const [diagnosis, setDiagnosis] = useState(null);
+  const [attachments, setAttachments] = useState([]);
   const [feedback, setFeedback] = useState("");
+  const [expandedNoteId, setExpandedNoteId] = useState(null);
 
-  const isSaved = savedNote !== null;
-
-  const updateField = (field, value) => {
+  function updateField(field, value) {
     setNote((current) => ({
       ...current,
       [field]: value,
     }));
-    setFeedback("");
-  };
 
-  const handleSave = (event) => {
+    setFeedback("");
+  }
+
+  function resetForm() {
+    setNote({ ...emptyNote });
+    setDiagnosis(null);
+    setAttachments([]);
+  }
+
+  function handleSave(event) {
     event.preventDefault();
 
     if (!note.patientName.trim()) {
@@ -37,84 +59,50 @@ const SoapNoteEntryPage = () => {
       return;
     }
 
-    if (
-      !note.subjective.trim() &&
-      !note.objective.trim() &&
-      !note.assessment.trim() &&
-      !note.plan.trim()
-    ) {
-      setFeedback("Please enter at least one section of the clinical note.");
+    const hasSoapContent = soapSections.some((section) =>
+      note[section.key].trim()
+    );
+
+    if (!hasSoapContent) {
+      setFeedback("Please complete at least one SOAP section.");
       return;
     }
 
-    setSavedNote({
+    const savedNote = {
       ...note,
+      id: `NOTE-${Date.now()}`,
+      patientName: note.patientName.trim(),
+      patientId: note.patientId.trim(),
+      diagnosis: diagnosis ? { ...diagnosis } : null,
+      attachments: attachments.map((file) => ({ ...file })),
+      visitId: `VISIT-${Date.now()}`,
       savedAt: new Date().toLocaleString(),
-    });
+      createdAt: new Date().toISOString(),
+    };
 
+    addClinicalNote(savedNote);
+
+    // Clear the form immediately so the next note starts fresh.
+    resetForm();
     setFeedback("Clinical note saved successfully.");
-  };
-
-  const handleNewNote = () => {
-    setNote(emptyNote);
-    setSavedNote(null);
-    setFeedback("");
-  };
-
-  const fields = [
-    {
-      name: "subjective",
-      label: "Subjective",
-      description: "Symptoms reported by the patient and relevant history.",
-      placeholder: "Describe the patient's symptoms and concerns...",
-    },
-    {
-      name: "objective",
-      label: "Objective",
-      description: "Examination findings, observations and test results.",
-      placeholder: "Enter examination findings and observations...",
-    },
-    {
-      name: "assessment",
-      label: "Assessment",
-      description: "Clinical impression or diagnosis.",
-      placeholder: "Enter the clinical assessment or diagnosis...",
-    },
-    {
-      name: "plan",
-      label: "Plan",
-      description: "Treatment, investigations, advice and follow-up.",
-      placeholder: "Enter the treatment and follow-up plan...",
-    },
-  ];
+    setExpandedNoteId(savedNote.id);
+  }
 
   return (
     <div className="page-content clinical-page">
       <div className="page-header">
-
         <div>
-          
-                <button
-        type="button"
-        className="secondary-action"
-        onClick={() => navigate("/staff/clinical-records")}
-      >
-        ← Back to Clinical Records
-      </button>
-
           <h1>Clinical Notes</h1>
-          <p>Record and review clinical notes for a patient visit.</p>
+     
         </div>
 
-        {isSaved && (
-          <button
-            type="button"
-            className="secondary-action"
-            onClick={handleNewNote}
-          >
-            + New Note
-          </button>
-        )}
+        <button
+          type="button"
+          className="secondary-action"
+          onClick={() => navigate("/staff/clinical-records")}
+        >
+          ← Back to Clinical Records
+        </button>
       </div>
 
       <form onSubmit={handleSave}>
@@ -133,9 +121,7 @@ const SoapNoteEntryPage = () => {
                 onChange={(event) =>
                   updateField("patientName", event.target.value)
                 }
-                placeholder="Enter patient name"
                 required
-                disabled={isSaved}
               />
             </div>
 
@@ -148,8 +134,6 @@ const SoapNoteEntryPage = () => {
                 onChange={(event) =>
                   updateField("patientId", event.target.value)
                 }
-                placeholder="Enter patient ID"
-                disabled={isSaved}
               />
             </div>
           </div>
@@ -160,90 +144,146 @@ const SoapNoteEntryPage = () => {
             <h2>Clinical Note</h2>
           </div>
 
-          <div className="clinical-soap-fields">
-            {fields.map((field) => (
-              <div className="clinical-form-field" key={field.name}>
-                <label htmlFor={`note-${field.name}`}>
-                  {field.label}
-                </label>
+          <SoapFields value={note} onChange={updateField} />
 
-                <p>{field.description}</p>
-
-                <textarea
-                  id={`note-${field.name}`}
-                  rows={4}
-                  value={note[field.name]}
-                  onChange={(event) =>
-                    updateField(field.name, event.target.value)
-                  }
-                  placeholder={field.placeholder}
-                  disabled={isSaved}
-                />
-              </div>
-            ))}
+          <div className="clinical-diagnosis-section">
+            <Icd10Lookup
+              value={diagnosis}
+              onChange={(value) => {
+                setDiagnosis(value);
+                setFeedback("");
+              }}
+            />
           </div>
+        </section>
+
+        <section className="clinical-card">
+          <div className="clinical-card-header">
+            <h2>Visit Attachments</h2>
+          </div>
+
+          <AttachmentUpload
+            files={attachments}
+            onChange={(files) => {
+              setAttachments(files);
+              setFeedback("");
+            }}
+          />
         </section>
 
         {feedback && (
           <p
-            className={
-              isSaved
-                ? "clinical-feedback clinical-feedback-success"
-                : "clinical-feedback clinical-feedback-error"
-            }
+            className={`clinical-feedback ${
+              feedback.includes("successfully")
+                ? "clinical-feedback-success"
+                : "clinical-feedback-error"
+            }`}
             role="status"
           >
             {feedback}
           </p>
         )}
 
-        {!isSaved && (
-          <div className="clinical-form-actions">
-            <button
-              type="submit"
-              className="primary-action"
-              disabled={!note.patientName.trim()}
-            >
-              Save Clinical Note
-            </button>
-          </div>
-        )}
+        <div className="clinical-form-actions">
+          <button type="submit" className="primary-action">
+            Save Clinical Note
+          </button>
+
+          <button
+            type="button"
+            className="secondary-action"
+            onClick={resetForm}
+          >
+            Clear Form
+          </button>
+        </div>
       </form>
 
-      {isSaved && (
-        <section className="clinical-card">
-          <div className="clinical-card-header">
-            <h2>Saved Note</h2>
-          </div>
-
-          <div className="clinical-record-meta">
+      <section className="clinical-card clinical-history-section">
+        <div className="clinical-card-header">
+          <div>
+            <h2>Saved Clinical Notes</h2>
             <p>
-              <strong>Patient:</strong> {savedNote.patientName}
-            </p>
-
-            {savedNote.patientId && (
-              <p>
-                <strong>Patient ID:</strong> {savedNote.patientId}
-              </p>
-            )}
-
-            <p>
-              <strong>Recorded:</strong> {savedNote.savedAt}
+              {savedNotes.length}{" "}
+              {savedNotes.length === 1 ? "record" : "records"}
             </p>
           </div>
+        </div>
 
-          {fields.map((field) =>
-            savedNote[field.name].trim() ? (
-              <div className="clinical-record-item" key={field.name}>
-                <strong>{field.label}</strong>
-                <p>{savedNote[field.name]}</p>
-              </div>
-            ) : null
-          )}
-        </section>
-      )}
+        {savedNotes.length === 0 ? (
+          <div className="clinical-empty-state">
+            No clinical notes saved yet.
+          </div>
+        ) : (
+          <div className="clinical-record-list">
+            {savedNotes.map((saved) => {
+              const isExpanded = expandedNoteId === saved.id;
+
+              return (
+                <article className="clinical-record-item" key={saved.id}>
+                  <div className="clinical-record-heading">
+                    <div>
+                      <strong>{saved.patientName}</strong>
+                      <p>
+                        {saved.patientId
+                          ? `Patient ID: ${saved.patientId} · `
+                          : ""}
+                        {saved.savedAt}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="clinical-text-button"
+                      onClick={() =>
+                        setExpandedNoteId(
+                          isExpanded ? null : saved.id
+                        )
+                      }
+                    >
+                      {isExpanded ? "Hide details" : "View note"}
+                    </button>
+                  </div>
+
+                  <p className="clinical-note-visit-id">
+                    {saved.visitId}
+                    {saved.diagnosis
+                      ? ` · ${saved.diagnosis.code} — ${saved.diagnosis.name}`
+                      : ""}
+                  </p>
+
+                  {isExpanded && (
+                    <div className="clinical-note-details">
+                      {soapSections.map((section) =>
+                        saved[section.key]?.trim() ? (
+                          <div
+                            className="clinical-record-item"
+                            key={section.key}
+                          >
+                            <strong>{section.label}</strong>
+                            <p>{saved[section.key]}</p>
+                          </div>
+                        ) : null
+                      )}
+
+                      {saved.attachments?.length > 0 && (
+                        <div className="clinical-record-item">
+                          <strong>Attachments</strong>
+                          {saved.attachments.map((file) => (
+                            <p key={file.id}>
+                              {file.name} · {(file.size / 1024).toFixed(1)} KB
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
     </div>
   );
-};
-
-export default SoapNoteEntryPage;
+}

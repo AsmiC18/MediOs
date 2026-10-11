@@ -268,9 +268,6 @@ const [openActivity, setOpenActivity] = useState(null);
     {dashboardData.revenue.amount}
   </strong>
 
-  <small>
-    Revenue collected today
-  </small>
 
   <span className="stat-card-link">
     View revenue →
@@ -289,9 +286,7 @@ const [openActivity, setOpenActivity] = useState(null);
       {dashboardData.appointments.total}
     </strong>
 
-    <small>
-      Today's appointments
-    </small>
+  
 
     <span className="stat-card-link">
       View appointments →
@@ -315,13 +310,11 @@ const [openActivity, setOpenActivity] = useState(null);
     {dashboardData.criticalFlags.count}
   </strong>
 
-  <small>
-    Require attention
-  </small>
+ 
 
-  <span className="stat-card-link">
+  {/* <span className="stat-card-link">
     View critical flags →
-  </span>
+  </span> */}
 </button>
 
 
@@ -336,9 +329,7 @@ const [openActivity, setOpenActivity] = useState(null);
       {dashboardData.pendingBills}
     </strong>
 
-    <small>
-      Require attention
-    </small>
+ 
 
     <span className="stat-card-link">
       View pending bills →

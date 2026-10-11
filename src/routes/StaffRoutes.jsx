@@ -86,6 +86,8 @@ import PrescriptionBuilderPage
 import ClinicalRecordsPage from
   "../features/clinicalRecords/pages/ClinicalRecordsPage";
 
+import TriageIntakePage from "../features/departments/emergency/pages/TriageIntakePage";
+
 const StaffRoutes = () => {
   return (
     <Routes>
@@ -230,6 +232,11 @@ const StaffRoutes = () => {
         <Route
           path="departments/emergency"
           element={<EmergencyPage />}
+        />
+
+        <Route
+          path="departments/emergency/triage-intake"
+          element={<TriageIntakePage />}
         />
         <Route
           path="departments/surgery"

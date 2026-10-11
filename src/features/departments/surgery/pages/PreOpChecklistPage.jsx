@@ -1,8 +1,11 @@
+
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-
-const bookingsStorageKey = "medios-surgery-ot-bookings";
-const checklistStorageKey = "medios-surgery-preop-checklists";
+import {
+  getSurgeryBookings,
+  getChecklistProgress,
+  setSurgeryBookings,
+} from "../components/OtBookingCard";
 
 const checklistSections = [
   {
@@ -11,12 +14,12 @@ const checklistSections = [
       {
         id: "identity",
         label: "Patient identity verified",
-        detail: "Confirm the patient's identity using the hospital's approved identifiers.",
+        detail: "Confirm the patient's identity using approved identifiers.",
       },
       {
         id: "consent",
         label: "Procedure consent documented",
-        detail: "Confirm the required consent is documented and available in the patient record.",
+        detail: "Confirm the required consent is documented in the patient record.",
       },
       {
         id: "site",
@@ -31,7 +34,7 @@ const checklistSections = [
       {
         id: "assessment",
         label: "Pre-operative assessment reviewed",
-        detail: "Confirm the responsible clinician has reviewed the pre-operative assessment.",
+        detail: "Confirm the responsible clinician has reviewed the assessment.",
       },
       {
         id: "allergies",
@@ -41,12 +44,12 @@ const checklistSections = [
       {
         id: "investigations",
         label: "Required investigations available",
-        detail: "Confirm the required test results and reports are available for the clinical team.",
+        detail: "Confirm required test results and reports are available.",
       },
       {
         id: "fasting",
         label: "Fasting status checked and documented",
-        detail: "Record that the responsible clinical team has checked fasting requirements.",
+        detail: "Confirm the responsible clinical team has checked fasting requirements.",
       },
     ],
   },
@@ -61,84 +64,25 @@ const checklistSections = [
       {
         id: "equipment",
         label: "Required equipment and supplies checked",
-        detail: "Confirm the team has checked equipment, instruments and required supplies.",
+        detail: "Confirm equipment, instruments and required supplies have been checked.",
       },
       {
         id: "insurance",
         label: "Insurance pre-authorisation status reviewed",
-        detail: "Check the linked insurance status and resolve pending approval according to hospital policy.",
+        detail: "Check the linked insurance status and follow up on pending approval.",
       },
     ],
   },
 ];
-
-const initialBookings = [
-  {
-    id: "OT-1001",
-    patientName: "Priya Menon",
-    patientId: "P002",
-    procedure: "Laparoscopic cholecystectomy",
-    surgeon: "Dr. Mehta",
-    date: "2026-10-10",
-    time: "09:00 AM",
-    otRoom: "OT-1",
-    insuranceStatus: "Approved",
-    checklistComplete: true,
-  },
-  {
-    id: "OT-1002",
-    patientName: "Arun Kumar",
-    patientId: "P014",
-    procedure: "Hernia repair",
-    surgeon: "Dr. Sharma",
-    date: "2026-10-10",
-    time: "11:30 AM",
-    otRoom: "OT-2",
-    insuranceStatus: "Pending",
-    checklistComplete: false,
-  },
-  {
-    id: "OT-1003",
-    patientName: "Rahul Singh",
-    patientId: "P021",
-    procedure: "Appendectomy",
-    surgeon: "Dr. Rao",
-    date: "2026-10-10",
-    time: "02:00 PM",
-    otRoom: "OT-1",
-    insuranceStatus: "Approved",
-    checklistComplete: false,
-  },
-];
-
-function readSavedBookings() {
-  try {
-    const saved = localStorage.getItem(bookingsStorageKey);
-    return saved ? JSON.parse(saved) : initialBookings;
-  } catch {
-    return initialBookings;
-  }
-}
-
-function readSavedChecklists() {
-  try {
-    return JSON.parse(localStorage.getItem(checklistStorageKey) || "{}");
-  } catch {
-    return {};
-  }
-}
 
 export default function PreOpChecklistPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const requestedBooking = searchParams.get("booking");
 
-  const [bookings, setBookings] = useState(readSavedBookings);
-  const [savedChecklists, setSavedChecklists] = useState(
-    readSavedChecklists
-  );
+  const [bookings, setBookings] = useState(getSurgeryBookings);
   const [selectedId, setSelectedId] = useState(
-    requestedBooking || initialBookings[0].id
+    requestedBooking || getSurgeryBookings()[0]?.id || ""
   );
   const [notice, setNotice] = useState("");
 
@@ -147,39 +91,20 @@ export default function PreOpChecklistPage() {
     []
   );
 
-  // Keep the selected booking in sync with the URL.
   useEffect(() => {
-    if (
-      requestedBooking &&
-      bookings.some((booking) => booking.id === requestedBooking)
-    ) {
+    if (requestedBooking) {
       setSelectedId(requestedBooking);
     }
-  }, [requestedBooking, bookings]);
-
-  // Load current booking data when the page becomes active.
-  useEffect(() => {
-    const syncBookings = () => {
-      setBookings(readSavedBookings());
-    };
-
-    window.addEventListener("focus", syncBookings);
-    window.addEventListener("pageshow", syncBookings);
-
-    return () => {
-      window.removeEventListener("focus", syncBookings);
-      window.removeEventListener("pageshow", syncBookings);
-    };
-  }, []);
+  }, [requestedBooking]);
 
   const selectedBooking = bookings.find(
     (booking) => booking.id === selectedId
   );
 
-  const checkedItems = savedChecklists[selectedId] || {};
+  const checkedItems = selectedBooking?.checklistItems || {};
 
   const completedCount = allItems.filter(
-    (item) => checkedItems[item.id]
+    (item) => checkedItems[item.id] === true
   ).length;
 
   const isComplete = completedCount === allItems.length;
@@ -189,91 +114,35 @@ export default function PreOpChecklistPage() {
   );
 
   const updateChecklist = (itemId, checked) => {
-    const nextChecklist = {
-      ...checkedItems,
-      [itemId]: checked,
-    };
-
-    const nextSavedChecklists = {
-      ...savedChecklists,
-      [selectedId]: nextChecklist,
-    };
-
-    setSavedChecklists(nextSavedChecklists);
-
-    try {
-      localStorage.setItem(
-        checklistStorageKey,
-        JSON.stringify(nextSavedChecklists)
-      );
-    } catch {
-      setNotice(
-        "Checklist updated for this session, but browser storage is unavailable."
-      );
-    }
-
-    // Update the shared OT booking record immediately.
     const nextBookings = bookings.map((booking) =>
       booking.id === selectedId
         ? {
             ...booking,
-            checklistComplete: allItems.every(
-              (item) => nextChecklist[item.id]
-            ),
+            checklistItems: {
+              ...(booking.checklistItems || {}),
+              [itemId]: checked,
+            },
           }
         : booking
     );
 
     setBookings(nextBookings);
-
-    try {
-      localStorage.setItem(
-        bookingsStorageKey,
-        JSON.stringify(nextBookings)
-      );
-    } catch {
-      setNotice(
-        "Checklist updated, but booking changes could not be saved in browser storage."
-      );
-    }
+    setSurgeryBookings(nextBookings);
+    setNotice("");
   };
 
   const saveChecklist = () => {
-    const currentChecklist = savedChecklists[selectedId] || {};
+    const progressNow = getChecklistProgress(selectedBooking);
 
-    const complete = allItems.every(
-      (item) => currentChecklist[item.id]
-    );
-
-    if (!complete) {
+    if (!progressNow.isComplete) {
       setNotice(
-        "Complete all required checklist items before marking the checklist complete."
-      );
-      return;
-    }
-
-    const nextBookings = bookings.map((booking) =>
-      booking.id === selectedId
-        ? { ...booking, checklistComplete: true }
-        : booking
-    );
-
-    setBookings(nextBookings);
-
-    try {
-      localStorage.setItem(
-        bookingsStorageKey,
-        JSON.stringify(nextBookings)
-      );
-    } catch {
-      setNotice(
-        "Checklist completed for this session, but browser storage is unavailable."
+        `${progressNow.completed} of ${progressNow.total} checks completed. Finish the remaining checks before confirming the OT slot.`
       );
       return;
     }
 
     setNotice(
-      "Checklist completed and saved. You can now return to the OT schedule."
+      "All 10 pre-operative checks are complete. You can now confirm the OT slot from the schedule."
     );
   };
 
@@ -282,9 +151,7 @@ export default function PreOpChecklistPage() {
       <div className="surgery-page">
         <header className="surgery-header">
           <div>
-            <p className="surgery-eyebrow">
-              DEPARTMENT MODULE · SURGERY
-            </p>
+            <p className="surgery-eyebrow">DEPARTMENT / SURGERY</p>
             <h1>Pre-operative checklist</h1>
             <p>No OT bookings are available.</p>
           </div>
@@ -292,9 +159,7 @@ export default function PreOpChecklistPage() {
           <button
             type="button"
             className="surgery-secondary-button"
-            onClick={() =>
-              navigate("/staff/departments/surgery")
-            }
+            onClick={() => navigate("/staff/departments/surgery")}
           >
             Back to OT schedule
           </button>
@@ -307,25 +172,19 @@ export default function PreOpChecklistPage() {
     <div className="surgery-page">
       <header className="surgery-header">
         <div>
-          <p className="surgery-eyebrow">
-            DEPARTMENT MODULE · SURGERY
-          </p>
+          <p className="surgery-eyebrow">DEPARTMENT / SURGERY</p>
           <h1>Pre-operative checklist</h1>
           <p>
-            Record readiness checks for the selected OT booking.
-            Every required item must be completed before the slot
-            can be confirmed.
+            Complete the required checks for this procedure before confirming the OT slot.
           </p>
         </div>
 
         <button
           type="button"
           className="surgery-secondary-button"
-          onClick={() =>
-            navigate("/staff/departments/surgery")
-          }
+          onClick={() => navigate("/staff/departments/surgery")}
         >
-          ← Back to OT schedule
+          Back to OT schedule
         </button>
       </header>
 
@@ -346,10 +205,7 @@ export default function PreOpChecklistPage() {
         <div className="surgery-panel-header">
           <div>
             <h2>Booking details</h2>
-            <p>
-              Select the surgery booking whose checklist you are
-              reviewing.
-            </p>
+            <p>Select the OT booking whose checklist you are reviewing.</p>
           </div>
 
           <span
@@ -358,24 +214,25 @@ export default function PreOpChecklistPage() {
             }`}
           >
             {isComplete
-              ? "Checklist complete"
-              : "Checklist incomplete"}
+              ? "All checks complete"
+              : `${allItems.length - completedCount} checks remaining`}
           </span>
         </div>
 
         <div className="surgery-checklist-booking-select">
           <label className="surgery-field">
-            OT booking
+            OT booking *
             <select
               value={selectedId}
-              onChange={(event) =>
-                setSelectedId(event.target.value)
-              }
+              onChange={(event) => {
+                setSelectedId(event.target.value);
+                setNotice("");
+              }}
+              required
             >
               {bookings.map((booking) => (
                 <option key={booking.id} value={booking.id}>
-                  {booking.id} — {booking.patientName} (
-                  {booking.procedure})
+                  {booking.id} — {booking.patientName} ({booking.procedure})
                 </option>
               ))}
             </select>
@@ -386,8 +243,7 @@ export default function PreOpChecklistPage() {
           <div>
             <span>Patient</span>
             <strong>
-              {selectedBooking.patientName} ·{" "}
-              {selectedBooking.patientId}
+              {selectedBooking.patientName} · {selectedBooking.patientId}
             </strong>
           </div>
 
@@ -421,7 +277,7 @@ export default function PreOpChecklistPage() {
 
         <div className="surgery-checklist-section">
           <div className="surgery-section-heading">
-            <h3>Required pre-op checks</h3>
+            <h3>Required pre-operative checks</h3>
             <span>
               {completedCount} of {allItems.length} complete
             </span>
@@ -430,7 +286,7 @@ export default function PreOpChecklistPage() {
           <div
             className="surgery-checklist-progress"
             role="progressbar"
-            aria-label="Checklist completion"
+            aria-label="Pre-operative checklist completion"
             aria-valuemin="0"
             aria-valuemax={allItems.length}
             aria-valuenow={completedCount}
@@ -438,53 +294,49 @@ export default function PreOpChecklistPage() {
             <div style={{ width: `${progress}%` }} />
           </div>
 
-          {checklistSections.map((section) => (
-            <section
-              key={section.title}
-              style={{ marginTop: 22 }}
-            >
-              <div className="surgery-section-heading">
-                <h3>{section.title}</h3>
-                <span>
-                  {
-                    section.items.filter(
-                      (item) => checkedItems[item.id]
-                    ).length
-                  }
-                  /{section.items.length}
-                </span>
-              </div>
+          {checklistSections.map((section) => {
+            const sectionCompleted = section.items.filter(
+              (item) => checkedItems[item.id]
+            ).length;
 
-              {section.items.map((item) => (
-                <label
-                  className="surgery-checklist-item"
-                  key={item.id}
-                >
-                  <input
-                    type="checkbox"
-                    checked={Boolean(checkedItems[item.id])}
-                    onChange={(event) =>
-                      updateChecklist(
-                        item.id,
-                        event.target.checked
-                      )
-                    }
-                  />
-
-                  <span className="surgery-checklist-label">
-                    <strong>{item.label}</strong>
-                    <small>{item.detail}</small>
+            return (
+              <section
+                key={section.title}
+                style={{ marginTop: 22 }}
+              >
+                <div className="surgery-section-heading">
+                  <h3>{section.title}</h3>
+                  <span>
+                    {sectionCompleted}/{section.items.length} complete
                   </span>
-                </label>
-              ))}
-            </section>
-          ))}
+                </div>
+
+                {section.items.map((item) => (
+                  <label
+                    className="surgery-checklist-item"
+                    key={item.id}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={Boolean(checkedItems[item.id])}
+                      onChange={(event) =>
+                        updateChecklist(item.id, event.target.checked)
+                      }
+                    />
+
+                    <span className="surgery-checklist-label">
+                      <strong>{item.label}</strong>
+                      <small>{item.detail}</small>
+                    </span>
+                  </label>
+                ))}
+              </section>
+            );
+          })}
 
           <p className="surgery-checklist-note">
-            This checklist supports the hospital's workflow and
-            does not replace clinical judgement or local safety
-            protocols. Insurance approval may require separate
-            confirmation by the authorised team.
+            Verify each item against the patient record and hospital safety protocol.
+            Insurance approval may require separate confirmation by the authorised team.
           </p>
         </div>
 
@@ -492,11 +344,9 @@ export default function PreOpChecklistPage() {
           <button
             type="button"
             className="surgery-secondary-button"
-            onClick={() =>
-              navigate("/staff/departments/surgery")
-            }
+            onClick={() => navigate("/staff/departments/surgery")}
           >
-            Cancel
+            Back to schedule
           </button>
 
           <button
@@ -505,9 +355,7 @@ export default function PreOpChecklistPage() {
             onClick={saveChecklist}
             disabled={!isComplete}
           >
-            {isComplete
-              ? "Complete checking"
-              : `Complete all items (${completedCount}/${allItems.length})`}
+            {isComplete ? "Checklist complete" : `Complete checks (${completedCount}/${allItems.length})`}
           </button>
         </div>
       </section>

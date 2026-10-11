@@ -102,8 +102,8 @@ const PrescriptionBuilderPage = () => {
     <div className="page-content clinical-page">
       <div className="page-header">
         <div>
-          <h1>Prescription Builder</h1>
-          <p>Create and review patient prescriptions.</p>
+          <h1>Prescriptions</h1>
+         
         </div>
 
         <button
@@ -144,7 +144,7 @@ const PrescriptionBuilderPage = () => {
                   setPatientName(event.target.value);
                   setSavedPrescriptionId(null);
                 }}
-                placeholder="Enter patient name"
+               
                 required
                 disabled={isSaved}
               />
@@ -162,7 +162,7 @@ const PrescriptionBuilderPage = () => {
                   setPatientId(event.target.value);
                   setSavedPrescriptionId(null);
                 }}
-                placeholder="Enter patient ID"
+            
                 disabled={isSaved}
               />
             </div>
@@ -177,7 +177,7 @@ const PrescriptionBuilderPage = () => {
                   setDiagnosis(event.target.value);
                   setSavedPrescriptionId(null);
                 }}
-                placeholder="Enter diagnosis"
+          
                 disabled={isSaved}
               />
             </div>
@@ -200,7 +200,7 @@ const PrescriptionBuilderPage = () => {
                     onChange={(event) =>
                       updateMedicine("name", event.target.value)
                     }
-                    placeholder="Enter medicine name"
+                  
                   />
                 </div>
 
@@ -212,7 +212,6 @@ const PrescriptionBuilderPage = () => {
                     onChange={(event) =>
                       updateMedicine("dosage", event.target.value)
                     }
-                    placeholder="e.g. 500 mg"
                   />
                 </div>
 
@@ -224,7 +223,6 @@ const PrescriptionBuilderPage = () => {
                     onChange={(event) =>
                       updateMedicine("frequency", event.target.value)
                     }
-                    placeholder="e.g. Twice daily"
                   />
                 </div>
 
@@ -236,7 +234,6 @@ const PrescriptionBuilderPage = () => {
                     onChange={(event) =>
                       updateMedicine("duration", event.target.value)
                     }
-                    placeholder="e.g. 5 days"
                   />
                 </div>
 
@@ -250,7 +247,6 @@ const PrescriptionBuilderPage = () => {
                     onChange={(event) =>
                       updateMedicine("instructions", event.target.value)
                     }
-                    placeholder="e.g. Take after food"
                   />
                 </div>
               </div>

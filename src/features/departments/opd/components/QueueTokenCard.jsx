@@ -9,35 +9,56 @@ export default function QueueTokenCard({
   isDragging,
   isDragOver,
 }) {
+  const isEmergency = patient.priority === "emergency";
+  const isWaiting = patient.status === "waiting";
+
   return (
     <div
-      className={`opd-queue-card ${
-        isDragging ? "dragging" : ""
-      } ${isDragOver ? "drag-over" : ""}`}
-      draggable={patient.status === "waiting"}
+      className={[
+        "opd-queue-card",
+        isEmergency ? "emergency-card" : "",
+        isDragging ? "dragging" : "",
+        isDragOver ? "drag-over" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      draggable={isWaiting}
       onDragStart={(event) => onDragStart(event, patient)}
       onDragOver={(event) => onDragOver(event, patient)}
       onDrop={(event) => onDrop(event, patient)}
       onDragEnd={onDragEnd}
     >
-      <div
-        className="opd-drag-handle"
-        title="Drag to reorder"
-      >
+      <div className="opd-drag-handle" title="Drag to reorder">
         ⠿
       </div>
 
       <div className="opd-patient-info">
-        <div className="opd-patient-name">
-          {patient.patientName}
+        <div className="opd-patient-topline">
+          <span className="opd-patient-name">{patient.patientName}</span>
+
+          <span
+            className={`opd-priority-badge ${
+              isEmergency ? "emergency" : "normal"
+            }`}
+          >
+            {isEmergency ? "Emergency" : "Normal"}
+          </span>
         </div>
 
         <div className="opd-patient-description">
           {patient.description}
         </div>
+
+        <div className="opd-arrival-time">
+          Arrived {patient.arrivalTime}
+        </div>
       </div>
 
       <div className="opd-card-actions">
+        <span className={`opd-status-label ${patient.status}`}>
+          {patient.status === "waiting" ? "Waiting" : "Called"}
+        </span>
+
         <button
           type="button"
           className="opd-edit-button"
@@ -56,9 +77,9 @@ export default function QueueTokenCard({
             event.stopPropagation();
             onCall(patient);
           }}
-          disabled={patient.status !== "waiting"}
+          disabled={!isWaiting}
         >
-          Call Patient
+          {isWaiting ? "Call Patient" : "Called"}
         </button>
       </div>
     </div>

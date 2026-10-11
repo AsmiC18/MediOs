@@ -157,9 +157,7 @@ export default function PatientSearchPage() {
 
         </div>
 
-        <small>
-          Search primarily by phone number, or use patient name or ID.
-        </small>
+     
 
       </section>
 
@@ -181,14 +179,14 @@ export default function PatientSearchPage() {
             </span>
           </div>
 
-          <button
+          {/* <button
             className="secondary-action"
             onClick={() =>
               alert("Duplicate merge tool will be implemented next.")
             }
           >
             Merge Duplicates
-          </button>
+          </button> */}
 
         </div>
 
