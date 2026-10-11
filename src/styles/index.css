@@ -11290,3 +11290,102 @@ a {
   }
 }
 
+.coming-soon-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 65vh;
+  padding: 28px 20px;
+  box-sizing: border-box;
+}
+
+.coming-soon-card {
+  width: 100%;
+  max-width: 520px;
+  padding: 42px 32px;
+  text-align: center;
+  background: #FAF9F5;
+  border: 1px solid #DFE1DA;
+  border-radius: 14px;
+  box-sizing: border-box;
+}
+
+.coming-soon-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 68px;
+  height: 68px;
+  margin: 0 auto 22px;
+  color: #0B4741;
+  background: #E8EFEB;
+  border-radius: 16px;
+}
+
+.coming-soon-badge {
+  display: inline-block;
+  padding: 6px 10px;
+  color: #0B4741;
+  background: #E8EFEB;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.coming-soon-card h1 {
+  margin: 18px 0 12px;
+  color: #073B3A;
+  font-size: 27px;
+  font-weight: 650;
+}
+
+.coming-soon-message {
+  max-width: 390px;
+  margin: 0 auto 12px;
+  color: #344F4B;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.coming-soon-subtext {
+  max-width: 390px;
+  margin: 0 auto;
+  color: #687571;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.coming-soon-button {
+  margin-top: 26px;
+  padding: 11px 18px;
+  border: 1px solid #0B4741;
+  border-radius: 7px;
+  background: #0B4741;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.coming-soon-button:hover {
+  background: #174F49;
+}
+
+.coming-soon-footer {
+  display: block;
+  margin-top: 28px;
+  color: #87918C;
+  font-size: 12px;
+}
+
+@media (max-width: 480px) {
+  .coming-soon-card {
+    padding: 32px 20px;
+  }
+
+  .coming-soon-card h1 {
+    font-size: 23px;
+  }
+}
+

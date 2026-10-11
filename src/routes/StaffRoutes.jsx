@@ -88,6 +88,9 @@ import ClinicalRecordsPage from
 
 import TriageIntakePage from "../features/departments/emergency/pages/TriageIntakePage";
 
+import ComingSoonPage from "../components/common/ComingSoonPage";
+
+
 const StaffRoutes = () => {
   return (
     <Routes>
@@ -185,9 +188,9 @@ const StaffRoutes = () => {
           element={<AttendanceDashboardPage />}
         />
 
-        <Route
+       <Route
           path="insurance"
-          element={<ClaimsDashboardPage />}
+          element={<ComingSoonPage moduleName="Insurance" />}
         />
 
        <Route
@@ -262,6 +265,21 @@ const StaffRoutes = () => {
           path="clinical-records/prescriptions"
           element={<PrescriptionBuilderPage />}
         />
+        <Route
+          path="insurance"
+          element={<ComingSoonPage moduleName="Insurance" />}
+        />
+
+        <Route
+          path="follow-up"
+          element={<ComingSoonPage moduleName="Follow-ups" />}
+        />
+
+        <Route
+          path="reports"
+          element={<ComingSoonPage moduleName="Reports" />}
+        />
+                
 
       </Route>
 
