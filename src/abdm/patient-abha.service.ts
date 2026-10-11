@@ -9,6 +9,7 @@ import {
   Patient,
 } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
+import { assertBranchAccess } from '../common/auth/branch-scope.util';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AbdmEnvironmentService } from './abdm-environment.service';
 import { AbdmGatewayService } from './abdm-gateway.service';
@@ -52,6 +53,8 @@ export class PatientAbhaService {
     if (!patient || patient.hospitalId !== user.hospitalId) {
       throw new NotFoundException('Patient not found');
     }
+
+    assertBranchAccess(user, patient.branchId);
 
     return patient;
   }

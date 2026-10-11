@@ -12,6 +12,10 @@ import {
   Prisma,
 } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
+import {
+  applyBranchScope,
+  assertBranchAccess,
+} from '../common/auth/branch-scope.util';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CheckInDto } from './dto/check-in.dto';
 import { QueueQueryDto } from './dto/queue-query.dto';
@@ -118,6 +122,8 @@ export class OpdQueueService {
       throw new NotFoundException('Queue entry not found');
     }
 
+    assertBranchAccess(user, entry.branchId);
+
     return entry;
   }
 
@@ -212,6 +218,7 @@ export class OpdQueueService {
     }
 
     await this.assertAppointmentEligibleForCheckIn(appointment, user.hospitalId);
+    assertBranchAccess(user, appointment.branchId);
 
     const queueDate = toQueueDate(appointment.startAt);
     const now = new Date();
@@ -296,21 +303,23 @@ export class OpdQueueService {
       throw new BadRequestException('Invalid queue date filter');
     }
 
-    const entries = await this.prisma.opdQueueEntry.findMany({
-      where: {
-        hospitalId: user.hospitalId,
-        queueDate: {
-          gte: startOfQueueDate(queueDate),
-          lt: endOfQueueDate(queueDate),
-        },
-        ...(query.branchId !== undefined && { branchId: query.branchId }),
-        ...(query.status !== undefined && { status: query.status }),
-        ...(query.priority !== undefined && { priority: query.priority }),
-        ...(query.appointmentId !== undefined && {
-          appointmentId: query.appointmentId,
-        }),
-        ...(query.patientId !== undefined && { patientId: query.patientId }),
+    const where = applyBranchScope(user, {
+      hospitalId: user.hospitalId,
+      queueDate: {
+        gte: startOfQueueDate(queueDate),
+        lt: endOfQueueDate(queueDate),
       },
+      ...(query.branchId !== undefined && { branchId: query.branchId }),
+      ...(query.status !== undefined && { status: query.status }),
+      ...(query.priority !== undefined && { priority: query.priority }),
+      ...(query.appointmentId !== undefined && {
+        appointmentId: query.appointmentId,
+      }),
+      ...(query.patientId !== undefined && { patientId: query.patientId }),
+    });
+
+    const entries = await this.prisma.opdQueueEntry.findMany({
+      where,
       include: queueInclude,
       orderBy: [{ priority: 'desc' }, { tokenNumber: 'asc' }],
     });

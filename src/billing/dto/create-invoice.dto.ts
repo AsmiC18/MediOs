@@ -13,6 +13,7 @@ import {
   ValidatorConstraintInterface,
 } from 'class-validator';
 import { validateStateCode, hasTaxedItems } from '../utils/gst.util';
+import { gstItemsForTaxValidation } from '../utils/invoice-item-dto.util';
 import { CreateInvoiceItemDto } from './create-invoice-item.dto';
 
 @ValidatorConstraint({ name: 'PlaceOfSupplyWhenTaxed', async: false })
@@ -23,7 +24,7 @@ class PlaceOfSupplyWhenTaxedConstraint implements ValidatorConstraintInterface {
   ): boolean {
     const object = args.object as CreateInvoiceDto;
 
-    if (!hasTaxedItems(object.items ?? [])) {
+    if (!hasTaxedItems(gstItemsForTaxValidation(object.items ?? []))) {
       return true;
     }
 

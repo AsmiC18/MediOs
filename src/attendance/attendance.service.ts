@@ -7,11 +7,19 @@ import {
 import {
   AttendanceStatus,
   Prisma,
+  ResourceStatus,
   WorkSchedule,
 } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
+import {
+  applyBranchScope,
+  assertBranchAccess,
+} from '../common/auth/branch-scope.util';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { DomainEventOutboxService } from '../notifications/domain-event-outbox.service';
+import { buildAppointmentMatchWhere } from './appointment-clock-in-match.util';
 import { AttendanceQueryDto } from './dto/attendance-query.dto';
+import { buildStaffAttendanceConsultationDomainEvent } from './staff-attendance-consultation-event.util';
 
 type AuthenticatedUser = {
   sub: string;
@@ -24,6 +32,7 @@ export class AttendanceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly domainEventOutboxService: DomainEventOutboxService,
   ) {}
 
   private normalizeAttendanceDate(referenceDate: Date = new Date()): Date {
@@ -166,7 +175,14 @@ export class AttendanceService {
     return hospital.defaultWorkSchedule;
   }
 
-  async clockIn(user: AuthenticatedUser) {
+  async clockIn(
+    user: AuthenticatedUser,
+    input: {
+      locationLatitude?: number;
+      locationLongitude?: number;
+      locationLabel?: string;
+    } = {},
+  ) {
     const date = this.normalizeAttendanceDate();
     const now = new Date();
     const branchId = user.branchId ?? undefined;
@@ -205,7 +221,7 @@ export class AttendanceService {
           );
         }
 
-        return tx.attendance.create({
+        const created = await tx.attendance.create({
           data: {
             hospitalId: user.hospitalId,
             branchId,
@@ -215,8 +231,56 @@ export class AttendanceService {
             status,
             lateMinutes,
             earlyLeaveMinutes: 0,
+            clockInLatitude: input.locationLatitude ?? null,
+            clockInLongitude: input.locationLongitude ?? null,
+            clockInLocationLabel: input.locationLabel?.trim() || null,
           },
         });
+
+        const resource = await tx.resource.findFirst({
+          where: {
+            hospitalId: user.hospitalId,
+            userId: user.sub,
+            status: ResourceStatus.ACTIVE,
+          },
+        });
+
+        if (resource) {
+          const appointment = await tx.appointment.findFirst({
+            where: buildAppointmentMatchWhere({
+              hospitalId: user.hospitalId,
+              resourceId: resource.id,
+              clockInAt: now,
+              attendanceBranchId: branchId ?? null,
+            }),
+          });
+
+          if (appointment) {
+            const event = buildStaffAttendanceConsultationDomainEvent({
+              attendanceId: created.id,
+              userId: user.sub,
+              resourceId: resource.id,
+              appointment,
+              clockInAt: now,
+            });
+
+            const outbox = await this.domainEventOutboxService.createInTransaction(
+              tx,
+              event,
+            );
+
+            await this.domainEventOutboxService.enqueueStaffAttendanceConsultationInTransaction(
+              tx,
+              {
+                hospitalId: user.hospitalId,
+                branchId: branchId ?? null,
+                outboxId: outbox.id,
+              },
+            );
+          }
+        }
+
+        return created;
       });
 
       await this.auditService.log({
@@ -260,6 +324,8 @@ export class AttendanceService {
     if (!attendance) {
       throw new NotFoundException('Attendance record not found for today');
     }
+
+    assertBranchAccess(user, attendance.branchId);
 
     if (!attendance.clockIn) {
       throw new BadRequestException('Clock-in time is missing for today');
@@ -337,14 +403,16 @@ export class AttendanceService {
       dateFilter.lte = this.normalizeQueryDate(query.toDate);
     }
 
+    const where = applyBranchScope(user, {
+      hospitalId: user.hospitalId,
+      ...(query.userId !== undefined && { userId: query.userId }),
+      ...(query.branchId !== undefined && { branchId: query.branchId }),
+      ...(query.status !== undefined && { status: query.status }),
+      ...(Object.keys(dateFilter).length > 0 && { date: dateFilter }),
+    });
+
     return this.prisma.attendance.findMany({
-      where: {
-        hospitalId: user.hospitalId,
-        ...(query.userId !== undefined && { userId: query.userId }),
-        ...(query.branchId !== undefined && { branchId: query.branchId }),
-        ...(query.status !== undefined && { status: query.status }),
-        ...(Object.keys(dateFilter).length > 0 && { date: dateFilter }),
-      },
+      where,
       orderBy: [{ date: 'desc' }, { clockIn: 'desc' }],
     });
   }
@@ -359,6 +427,8 @@ export class AttendanceService {
     if (!attendance || attendance.hospitalId !== user.hospitalId) {
       throw new NotFoundException('Attendance record not found');
     }
+
+    assertBranchAccess(user, attendance.branchId);
 
     return attendance;
   }

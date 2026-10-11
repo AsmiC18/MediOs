@@ -1,0 +1,8 @@
+import { InsurancePreauthAttachmentType } from '@prisma/client';
+import { IsEnum, IsOptional } from 'class-validator';
+
+export class UploadPreauthAttachmentDto {
+  @IsOptional()
+  @IsEnum(InsurancePreauthAttachmentType)
+  attachmentType?: InsurancePreauthAttachmentType;
+}

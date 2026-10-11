@@ -5,11 +5,13 @@ import { IpdAdmissionController } from './ipd-admission.controller';
 import { IpdAdmissionService } from './ipd-admission.service';
 import { IpdBedController } from './ipd-bed.controller';
 import { IpdBedService } from './ipd-bed.service';
+import { IpdDailyChartController } from './ipd-daily-chart.controller';
+import { IpdDailyChartService } from './ipd-daily-chart.service';
 
 @Module({
   imports: [CommonModule, AuditModule],
-  controllers: [IpdBedController, IpdAdmissionController],
-  providers: [IpdBedService, IpdAdmissionService],
-  exports: [IpdBedService, IpdAdmissionService],
+  controllers: [IpdBedController, IpdAdmissionController, IpdDailyChartController],
+  providers: [IpdBedService, IpdAdmissionService, IpdDailyChartService],
+  exports: [IpdBedService, IpdAdmissionService, IpdDailyChartService],
 })
 export class IpdModule {}

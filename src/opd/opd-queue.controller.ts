@@ -16,9 +16,13 @@ import { CheckInDto } from './dto/check-in.dto';
 import { QueueQueryDto } from './dto/queue-query.dto';
 import { UpdatePriorityDto } from './dto/update-priority.dto';
 import { OpdQueueService } from './opd-queue.service';
+import { FeatureGuard } from '../plans/feature.guard';
+import { RequireFeature } from '../plans/require-feature.decorator';
+import { FeatureKey } from '../plans/feature-keys';
 
 @Controller('opd/queue')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard, FeatureGuard)
+@RequireFeature(FeatureKey.OPD)
 export class OpdQueueController {
   constructor(private readonly opdQueueService: OpdQueueService) {}
 

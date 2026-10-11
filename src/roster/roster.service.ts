@@ -6,6 +6,12 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
+import {
+  applyBranchScope,
+  assertBranchAccess,
+  resolveCreateBranchId,
+  resolveUpdateBranchId,
+} from '../common/auth/branch-scope.util';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateRosterEntryDto } from './dto/create-roster-entry.dto';
 import { RosterEntryQueryDto } from './dto/roster-entry-query.dto';
@@ -78,6 +84,8 @@ export class RosterService {
       throw new NotFoundException('Branch not found');
     }
 
+    assertBranchAccess(user, branch.id);
+
     return branch;
   }
 
@@ -91,6 +99,8 @@ export class RosterService {
     if (!entry || entry.hospitalId !== user.hospitalId) {
       throw new NotFoundException('Roster entry not found');
     }
+
+    assertBranchAccess(user, entry.branchId);
 
     return entry;
   }
@@ -124,8 +134,10 @@ export class RosterService {
   async create(user: AuthenticatedUser, dto: CreateRosterEntryDto) {
     await this.findOwnedUser(user, dto.userId);
 
-    if (dto.branchId) {
-      await this.findOwnedBranch(user, dto.branchId);
+    const branchId = resolveCreateBranchId(user, dto.branchId);
+
+    if (branchId) {
+      await this.findOwnedBranch(user, branchId);
     }
 
     this.validateShiftTimes(dto.shiftStartTime, dto.shiftEndTime);
@@ -137,7 +149,7 @@ export class RosterService {
       const entry = await this.prisma.rosterEntry.create({
         data: {
           hospitalId: user.hospitalId,
-          branchId: dto.branchId,
+          branchId,
           userId: dto.userId,
           date,
           shiftStartTime: dto.shiftStartTime,
@@ -172,7 +184,7 @@ export class RosterService {
       await this.findOwnedUser(user, query.userId);
     }
 
-    if (query.branchId) {
+    if (user.branchId == null && query.branchId) {
       await this.findOwnedBranch(user, query.branchId);
     }
 
@@ -186,13 +198,15 @@ export class RosterService {
       dateFilter.lte = this.normalizeRosterDate(query.toDate);
     }
 
+    const where = applyBranchScope(user, {
+      hospitalId: user.hospitalId,
+      ...(query.userId !== undefined && { userId: query.userId }),
+      ...(query.branchId !== undefined && { branchId: query.branchId }),
+      ...(Object.keys(dateFilter).length > 0 && { date: dateFilter }),
+    });
+
     return this.prisma.rosterEntry.findMany({
-      where: {
-        hospitalId: user.hospitalId,
-        ...(query.userId !== undefined && { userId: query.userId }),
-        ...(query.branchId !== undefined && { branchId: query.branchId }),
-        ...(Object.keys(dateFilter).length > 0 && { date: dateFilter }),
-      },
+      where,
       orderBy: [{ date: 'desc' }, { shiftStartTime: 'asc' }],
     });
   }
@@ -212,8 +226,9 @@ export class RosterService {
       await this.findOwnedUser(user, dto.userId);
     }
 
-    if (dto.branchId) {
-      await this.findOwnedBranch(user, dto.branchId);
+    const nextBranchId = resolveUpdateBranchId(user, dto.branchId);
+    if (nextBranchId) {
+      await this.findOwnedBranch(user, nextBranchId);
     }
 
     const nextUserId = dto.userId ?? existing.userId;
@@ -242,7 +257,7 @@ export class RosterService {
         },
         data: {
           ...(dto.userId !== undefined && { userId: dto.userId }),
-          ...(dto.branchId !== undefined && { branchId: dto.branchId }),
+          ...(nextBranchId !== undefined && { branchId: nextBranchId }),
           ...(dto.date !== undefined && { date: nextDate }),
           ...(dto.shiftStartTime !== undefined && {
             shiftStartTime: dto.shiftStartTime,

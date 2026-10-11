@@ -4,9 +4,13 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { CreatePolicyDto, PolicyQueryDto, UpdatePolicyDto } from './dto/policy.dto';
 import { InsuranceService } from './insurance.service';
+import { FeatureGuard } from '../plans/feature.guard';
+import { RequireFeature } from '../plans/require-feature.decorator';
+import { FeatureKey } from '../plans/feature-keys';
 
 @Controller('insurance/policies')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard, FeatureGuard)
+@RequireFeature(FeatureKey.INSURANCE)
 export class InsurancePolicyController {
   constructor(private readonly insuranceService: InsuranceService) {}
 

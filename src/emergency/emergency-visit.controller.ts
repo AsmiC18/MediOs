@@ -17,9 +17,13 @@ import { EmergencyVisitQueryDto } from './dto/emergency-visit-query.dto';
 import { EscalateDto } from './dto/escalate.dto';
 import { SetDispositionDto } from './dto/set-disposition.dto';
 import { EmergencyService } from './emergency.service';
+import { FeatureGuard } from '../plans/feature.guard';
+import { RequireFeature } from '../plans/require-feature.decorator';
+import { FeatureKey } from '../plans/feature-keys';
 
 @Controller('emergency/visits')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard, FeatureGuard)
+@RequireFeature(FeatureKey.EMERGENCY)
 export class EmergencyVisitController {
   constructor(private readonly emergencyService: EmergencyService) {}
 

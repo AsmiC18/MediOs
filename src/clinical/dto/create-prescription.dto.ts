@@ -11,6 +11,10 @@ import {
 
 export class PrescriptionItemDto {
   @IsString()
+  @IsOptional()
+  clinicalDrugId?: string;
+
+  @IsString()
   @MinLength(1)
   medicationName: string;
 
@@ -41,10 +45,25 @@ export class PrescriptionItemDto {
   quantity?: number;
 }
 
+export class SafetyOverrideDto {
+  @IsArray()
+  @IsString({ each: true })
+  findingKeys: string[];
+
+  @IsString()
+  @MinLength(1)
+  reason: string;
+}
+
 export class CreatePrescriptionDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SafetyOverrideDto)
+  safetyOverrides?: SafetyOverrideDto;
 
   @IsArray()
   @ValidateNested({ each: true })

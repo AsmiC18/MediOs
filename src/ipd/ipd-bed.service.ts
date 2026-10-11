@@ -7,6 +7,11 @@ import {
 } from '@nestjs/common';
 import { BedStatus, Prisma } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
+import {
+  applyBranchScope,
+  assertBranchAccess,
+  resolveCreateBranchId,
+} from '../common/auth/branch-scope.util';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { BedQueryDto } from './dto/bed-query.dto';
 import { CreateBedDto } from './dto/create-bed.dto';
@@ -56,17 +61,25 @@ export class IpdBedService {
       throw new NotFoundException('Bed not found');
     }
 
+    assertBranchAccess(user, bed.branchId);
+
     return bed;
   }
 
   async createBed(user: AuthenticatedUser, dto: CreateBedDto) {
-    await this.validateBranch(user, dto.branchId);
+    const branchId = resolveCreateBranchId(user, dto.branchId);
+
+    if (!branchId) {
+      throw new BadRequestException('branchId is required');
+    }
+
+    await this.validateBranch(user, branchId);
 
     try {
       const bed = await this.prisma.ipdBed.create({
         data: {
           hospitalId: user.hospitalId,
-          branchId: dto.branchId,
+          branchId,
           wardName: dto.wardName.trim(),
           roomNumber: dto.roomNumber.trim(),
           bedNumber: dto.bedNumber.trim(),
@@ -109,16 +122,25 @@ export class IpdBedService {
   }
 
   async listBeds(user: AuthenticatedUser, query: BedQueryDto = {}) {
-    return this.prisma.ipdBed.findMany({
-      where: {
-        hospitalId: user.hospitalId,
-        ...(query.branchId !== undefined && { branchId: query.branchId }),
+    if (user.branchId == null && query.branchId) {
+      await this.validateBranch(user, query.branchId);
+    }
+
+    const where = applyBranchScope(user, {
+      hospitalId: user.hospitalId,
+      ...(query.branchId !== undefined && { branchId: query.branchId }),
         ...(query.wardName !== undefined && {
-          wardName: { equals: query.wardName, mode: 'insensitive' },
+          wardName: {
+            equals: query.wardName,
+            mode: Prisma.QueryMode.insensitive,
+          },
         }),
         ...(query.status !== undefined && { status: query.status }),
         ...(query.bedType !== undefined && { bedType: query.bedType }),
-      },
+    });
+
+    return this.prisma.ipdBed.findMany({
+      where,
       include: {
         branch: {
           select: { id: true, name: true, code: true },

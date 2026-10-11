@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { AbdmRegistrationStatus } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
+import { assertBranchAccess } from '../common/auth/branch-scope.util';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AbdmEnvironmentService } from './abdm-environment.service';
 import { LinkHprDto } from './dto/link-hpr.dto';
@@ -33,6 +34,8 @@ export class AbdmHprService {
     if (!targetUser || targetUser.hospitalId !== user.hospitalId) {
       throw new NotFoundException('User not found');
     }
+
+    assertBranchAccess(user, targetUser.branchId);
 
     return targetUser;
   }

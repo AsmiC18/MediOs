@@ -120,6 +120,48 @@ export class AbdmEnvironmentService {
     return parsed;
   }
 
+  /**
+   * PEM public key for verifying ABDM gateway callback JWT signatures (RS256).
+   * Obtain from ABDM gateway /certs or operator key management; rotate by updating env.
+   */
+  getCallbackJwtPublicKey(): string | null {
+    const raw = process.env.ABDM_CALLBACK_JWT_PUBLIC_KEY?.trim();
+    if (!raw) {
+      return null;
+    }
+    return raw.replace(/\\n/g, '\n');
+  }
+
+  /** When true, fetch verification key from gateway /certs using configured client credentials. */
+  useGatewayCertsForCallbackJwt(): boolean {
+    const raw = process.env.ABDM_CALLBACK_JWT_USE_GATEWAY_CERTS?.trim().toLowerCase();
+    return raw === 'true' || raw === '1' || raw === 'yes';
+  }
+
+  getCallbackJwtIssuer(): string | null {
+    const value = process.env.ABDM_CALLBACK_JWT_ISSUER?.trim();
+    return value || null;
+  }
+
+  getCallbackJwtAudience(): string | null {
+    const value = process.env.ABDM_CALLBACK_JWT_AUDIENCE?.trim();
+    return value || null;
+  }
+
+  getCallbackJwtAlgorithms(): string[] {
+    const raw = process.env.ABDM_CALLBACK_JWT_ALGORITHMS?.trim();
+    if (!raw) {
+      return ['RS256'];
+    }
+
+    const algorithms = raw
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    return algorithms.length > 0 ? algorithms : ['RS256'];
+  }
+
   getClientCredentials(): AbdmClientCredentials {
     const environment = this.getEnvironment();
 

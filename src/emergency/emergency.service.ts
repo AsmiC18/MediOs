@@ -11,7 +11,19 @@ import {
   Prisma,
 } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
+import {
+  applyBranchScope,
+  assertBranchAccess,
+  resolveCreateBranchId,
+} from '../common/auth/branch-scope.util';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { DepartmentBillingEnqueueService } from '../billing/department/department-billing-enqueue.service';
+import { DomainEventOutboxService } from '../notifications/domain-event-outbox.service';
+import {
+  buildEmergencyVisitEscalatedDomainEvent,
+  buildEmergencyVisitEscalatedEventPayload,
+} from './emergency-visit-escalated-event.util';
+import { EmergencyStaffNotificationService } from './emergency-staff-notification.service';
 import { CreateEmergencyVisitDto } from './dto/create-emergency-visit.dto';
 import { CreateTriageDto } from './dto/create-triage.dto';
 import { EmergencyVisitQueryDto } from './dto/emergency-visit-query.dto';
@@ -67,6 +79,9 @@ export class EmergencyService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly domainEventOutboxService: DomainEventOutboxService,
+    private readonly emergencyStaffNotificationService: EmergencyStaffNotificationService,
+    private readonly departmentBillingEnqueue?: DepartmentBillingEnqueueService,
   ) {}
 
   private async validatePatient(user: AuthenticatedUser, patientId: string) {
@@ -80,6 +95,10 @@ export class EmergencyService {
 
     if (patient.mergedIntoPatientId) {
       throw new BadRequestException('Patient record is not active');
+    }
+
+    if (patient.branchId != null) {
+      assertBranchAccess(user, patient.branchId);
     }
 
     return patient;
@@ -122,6 +141,8 @@ export class EmergencyService {
     if (!visit || visit.hospitalId !== user.hospitalId) {
       throw new NotFoundException('Emergency visit not found');
     }
+
+    assertBranchAccess(user, visit.branchId);
 
     return visit;
   }
@@ -232,13 +253,10 @@ export class EmergencyService {
     await this.validatePatient(user, dto.patientId);
     await this.validateAssessor(user, user.sub);
 
-    let branchId: string | null = null;
+    const branchId = resolveCreateBranchId(user, dto.branchId);
 
-    if (dto.branchId) {
-      await this.validateBranch(user, dto.branchId);
-      branchId = dto.branchId;
-    } else if (user.branchId) {
-      branchId = user.branchId;
+    if (branchId) {
+      await this.validateBranch(user, branchId);
     }
 
     const visit = await this.prisma.$transaction(async (tx) => {
@@ -296,6 +314,10 @@ export class EmergencyService {
       where.patientId = query.patientId;
     }
 
+    if (user.branchId == null && query.branchId) {
+      await this.validateBranch(user, query.branchId);
+    }
+
     if (query.branchId) {
       where.branchId = query.branchId;
     }
@@ -315,7 +337,7 @@ export class EmergencyService {
     }
 
     const visits = await this.prisma.emergencyVisit.findMany({
-      where,
+      where: applyBranchScope(user, where),
       include: visitInclude,
       orderBy: { arrivalAt: 'desc' },
     });
@@ -453,17 +475,44 @@ export class EmergencyService {
       throw new BadRequestException('Emergency visit is already escalated');
     }
 
-    const updatedTriage = await this.prisma.triageRecord.update({
-      where: { id: latestTriage.id },
-      data: {
-        escalatedAt: new Date(),
-        escalationReason: dto.reason.trim(),
-      },
-      include: {
-        assessedBy: {
-          select: { id: true, name: true, email: true },
+    const updatedTriage = await this.prisma.$transaction(async (tx) => {
+      const triage = await tx.triageRecord.update({
+        where: { id: latestTriage.id },
+        data: {
+          escalatedAt: new Date(),
+          escalationReason: dto.reason.trim(),
         },
-      },
+        include: {
+          assessedBy: {
+            select: { id: true, name: true, email: true },
+          },
+        },
+      });
+
+      const event = buildEmergencyVisitEscalatedDomainEvent({
+        emergencyVisitId: visit.id,
+        triageRecordId: triage.id,
+        patientId: visit.patientId,
+        hospitalId: user.hospitalId,
+        branchId: visit.branchId,
+        visitPriority: visit.priority,
+        triagePriority: triage.priority,
+        escalationReason: dto.reason.trim(),
+        escalatedByUserId: user.sub,
+      });
+
+      const outbox = await this.domainEventOutboxService.createInTransaction(
+        tx,
+        event,
+      );
+
+      await this.domainEventOutboxService.enqueueDispatchInTransaction(tx, {
+        hospitalId: user.hospitalId,
+        branchId: visit.branchId,
+        outboxId: outbox.id,
+      });
+
+      return triage;
     });
 
     await this.auditService.log({
@@ -480,6 +529,26 @@ export class EmergencyService {
     });
 
     await this.onEmergencyEscalated(visit.id, updatedTriage.id, dto.reason);
+
+    const escalationSnapshot = buildEmergencyVisitEscalatedEventPayload({
+      emergencyVisitId: visit.id,
+      triageRecordId: updatedTriage.id,
+      patientId: visit.patientId,
+      hospitalId: user.hospitalId,
+      branchId: visit.branchId,
+      visitPriority: visit.priority,
+      triagePriority: updatedTriage.priority,
+      escalationReason: dto.reason.trim(),
+      escalatedByUserId: user.sub,
+    });
+    await this.emergencyStaffNotificationService.notifyEscalation({
+      hospitalId: user.hospitalId,
+      branchId: visit.branchId,
+      emergencyVisitId: visit.id,
+      triageRecordId: updatedTriage.id,
+      summary: escalationSnapshot.summary,
+      excludeUserId: user.sub,
+    });
 
     return {
       triage: this.formatTriageRecord(updatedTriage),

@@ -1,0 +1,44 @@
+import {
+  IsArray,
+  IsBoolean,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MinLength,
+} from 'class-validator';
+
+export class UpdateClinicalDrugDto {
+  @IsString()
+  @MinLength(1)
+  @IsOptional()
+  genericName?: string;
+
+  @IsString()
+  @IsOptional()
+  brandName?: string;
+
+  @IsString()
+  @IsOptional()
+  strength?: string;
+
+  @IsString()
+  @IsOptional()
+  dosageForm?: string;
+
+  @IsString()
+  @IsOptional()
+  route?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  isActive?: boolean;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  ingredients?: string[];
+
+  @IsUUID()
+  @IsOptional()
+  defaultPharmacyProductId?: string;
+}

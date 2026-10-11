@@ -18,9 +18,13 @@ import {
   UpdateBatchDto,
 } from './dto/create-batch.dto';
 import { PharmacyService } from './pharmacy.service';
+import { FeatureGuard } from '../plans/feature.guard';
+import { RequireFeature } from '../plans/require-feature.decorator';
+import { FeatureKey } from '../plans/feature-keys';
 
 @Controller('pharmacy/batches')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard, FeatureGuard)
+@RequireFeature(FeatureKey.PHARMACY)
 export class PharmacyBatchController {
   constructor(private readonly pharmacyService: PharmacyService) {}
 

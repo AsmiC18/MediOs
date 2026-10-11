@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import {
   AbdmConsentAuditAction,
@@ -11,13 +12,23 @@ import {
   Prisma,
 } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
+import {
+  applyBranchScope,
+  assertBranchAccess,
+  resolveCreateBranchId,
+} from '../common/auth/branch-scope.util';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AbdmConsentAuditService } from './abdm-consent-audit.service';
 import { AbdmConsentManagerService } from './abdm-consent-manager.service';
+import { AbdmEnvironmentService } from './abdm-environment.service';
+import { isExternalConsentManagerTransition } from './abdm-consent-real-mode.util';
 import { ConsentQueryDto } from './dto/consent-query.dto';
 import { CreateConsentDto } from './dto/create-consent.dto';
 import { UpdateConsentStatusDto } from './dto/update-consent-status.dto';
+import { SystemJobExecutionContext } from '../jobs/system-job.types';
 import { isAllowedConsentTransition } from './utils/consent-transitions.util';
+
+const CONSENT_EXPIRE_BATCH_SIZE = 100;
 
 type AuthenticatedUser = {
   sub: string;
@@ -35,6 +46,7 @@ export class AbdmConsentService {
     private readonly auditService: AuditService,
     private readonly consentAuditService: AbdmConsentAuditService,
     private readonly consentManagerService: AbdmConsentManagerService,
+    private readonly environmentService: AbdmEnvironmentService,
   ) {}
 
   private async findOwnedPatient(user: AuthenticatedUser, patientId: string) {
@@ -45,6 +57,8 @@ export class AbdmConsentService {
     if (!patient || patient.hospitalId !== user.hospitalId) {
       throw new NotFoundException('Patient not found');
     }
+
+    assertBranchAccess(user, patient.branchId);
 
     return patient;
   }
@@ -57,6 +71,8 @@ export class AbdmConsentService {
     if (!consent || consent.hospitalId !== user.hospitalId) {
       throw new NotFoundException('Consent not found');
     }
+
+    assertBranchAccess(user, consent.branchId);
 
     return consent;
   }
@@ -156,20 +172,23 @@ export class AbdmConsentService {
     return this.applyStatusTransition(user, consent, AbdmConsentStatus.EXPIRED);
   }
 
-  async expireExpiredConsents(input: {
-    hospitalId: string;
-    patientId?: string;
-  }): Promise<number> {
+  async expireExpiredConsents(
+    user: AuthenticatedUser,
+    input: {
+      hospitalId: string;
+      patientId?: string;
+    },
+  ): Promise<number> {
     const now = new Date();
     const expiredConsents = await this.prisma.abdmConsent.findMany({
-      where: {
+      where: applyBranchScope(user, {
         hospitalId: input.hospitalId,
         ...(input.patientId ? { patientId: input.patientId } : {}),
         status: AbdmConsentStatus.GRANTED,
         expiresAt: {
           lte: now,
         },
-      },
+      }),
     });
 
     for (const consent of expiredConsents) {
@@ -194,6 +213,15 @@ export class AbdmConsentService {
     reason?: string,
   ): Promise<AbdmConsent> {
     this.assertValidTransition(consent.status, nextStatus);
+
+    if (
+      !this.environmentService.isMockMode() &&
+      isExternalConsentManagerTransition(consent.status, nextStatus)
+    ) {
+      throw new ServiceUnavailableException(
+        'ABDM consent manager transitions are not available in real mode',
+      );
+    }
 
     const now = new Date();
     let consentRequestId = consent.consentRequestId;
@@ -260,8 +288,13 @@ export class AbdmConsentService {
   ) {
     const patient = await this.findOwnedPatient(user, patientId);
 
-    if (dto.branchId) {
-      await this.validateBranch(user, dto.branchId);
+    const branchId = resolveCreateBranchId(
+      user,
+      dto.branchId ?? patient.branchId,
+    );
+
+    if (branchId) {
+      await this.validateBranch(user, branchId);
     }
 
     const initialStatus = dto.status ?? AbdmConsentStatus.REQUESTED;
@@ -272,6 +305,15 @@ export class AbdmConsentService {
     ) {
       throw new BadRequestException(
         'Consent can only be created with DRAFT or REQUESTED status',
+      );
+    }
+
+    if (
+      !this.environmentService.isMockMode() &&
+      initialStatus === AbdmConsentStatus.REQUESTED
+    ) {
+      throw new ServiceUnavailableException(
+        'ABDM consent manager integration is not available in real mode',
       );
     }
 
@@ -290,7 +332,7 @@ export class AbdmConsentService {
     const consent = await this.prisma.abdmConsent.create({
       data: {
         hospitalId: user.hospitalId,
-        branchId: dto.branchId ?? patient.branchId,
+        branchId,
         patientId,
         consentRequestId,
         purpose: dto.purpose,
@@ -339,7 +381,7 @@ export class AbdmConsentService {
     query: ConsentQueryDto = {},
   ) {
     await this.findOwnedPatient(user, patientId);
-    await this.expireExpiredConsents({
+    await this.expireExpiredConsents(user, {
       hospitalId: user.hospitalId,
       patientId,
     });
@@ -347,10 +389,10 @@ export class AbdmConsentService {
     const page = query.page ?? DEFAULT_PAGE;
     const limit = query.limit ?? DEFAULT_LIMIT;
 
-    const where: Prisma.AbdmConsentWhereInput = {
+    const where = applyBranchScope(user, {
       hospitalId: user.hospitalId,
       patientId,
-    };
+    });
 
     const [total, data] = await this.prisma.$transaction([
       this.prisma.abdmConsent.count({ where }),
@@ -384,7 +426,7 @@ export class AbdmConsentService {
     purpose: string,
   ) {
     await this.findOwnedPatient(user, patientId);
-    await this.expireExpiredConsents({
+    await this.expireExpiredConsents(user, {
       hospitalId: user.hospitalId,
       patientId,
     });
@@ -392,13 +434,13 @@ export class AbdmConsentService {
     const now = new Date();
 
     return this.prisma.abdmConsent.findFirst({
-      where: {
+      where: applyBranchScope(user, {
         hospitalId: user.hospitalId,
         patientId,
         purpose,
         status: AbdmConsentStatus.GRANTED,
         OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
-      },
+      }),
       orderBy: { grantedAt: 'desc' },
     });
   }
@@ -428,5 +470,68 @@ export class AbdmConsentService {
   async getConsentAuditLog(user: AuthenticatedUser, consentId: string) {
     await this.findOwnedConsent(user, consentId);
     return this.consentAuditService.findByConsentId(user.hospitalId, consentId);
+  }
+
+  async expireExpiredConsentsForSystemJob(
+    context: SystemJobExecutionContext,
+  ): Promise<number> {
+    const now = new Date();
+    let expiredCount = 0;
+
+    for (;;) {
+      const batch = await this.prisma.abdmConsent.findMany({
+        where: {
+          hospitalId: context.hospitalId,
+          ...(context.branchId != null ? { branchId: context.branchId } : {}),
+          status: AbdmConsentStatus.GRANTED,
+          expiresAt: { lte: now },
+        },
+        orderBy: { id: 'asc' },
+        take: CONSENT_EXPIRE_BATCH_SIZE,
+      });
+
+      if (batch.length === 0) {
+        break;
+      }
+
+      for (const consent of batch) {
+        if (consent.hospitalId !== context.hospitalId) {
+          throw new Error('Consent hospitalId does not match job hospital scope');
+        }
+        if (
+          context.branchId != null &&
+          consent.branchId !== context.branchId
+        ) {
+          continue;
+        }
+        if (!this.isConsentExpired(consent, now)) {
+          continue;
+        }
+
+        try {
+          await this.applyStatusTransition(
+            {
+              sub: consent.requestedByUserId,
+              hospitalId: context.hospitalId,
+              branchId: consent.branchId,
+            },
+            consent,
+            AbdmConsentStatus.EXPIRED,
+          );
+          expiredCount += 1;
+        } catch (error) {
+          if (error instanceof ConflictException) {
+            continue;
+          }
+          throw error;
+        }
+      }
+
+      if (batch.length < CONSENT_EXPIRE_BATCH_SIZE) {
+        break;
+      }
+    }
+
+    return expiredCount;
   }
 }

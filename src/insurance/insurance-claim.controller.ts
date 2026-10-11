@@ -9,12 +9,21 @@ import {
   RecordClaimPaymentDto,
   RejectClaimDto,
 } from './dto/claim.dto';
+import { ManualClaimSubmissionDto } from './dto/manual-claim-submission.dto';
+import { InsuranceClaimExternalService } from './insurance-claim-external.service';
 import { InsuranceService } from './insurance.service';
+import { FeatureGuard } from '../plans/feature.guard';
+import { RequireFeature } from '../plans/require-feature.decorator';
+import { FeatureKey } from '../plans/feature-keys';
 
 @Controller('insurance/claims')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard, FeatureGuard)
+@RequireFeature(FeatureKey.INSURANCE)
 export class InsuranceClaimController {
-  constructor(private readonly insuranceService: InsuranceService) {}
+  constructor(
+    private readonly insuranceService: InsuranceService,
+    private readonly claimExternalService: InsuranceClaimExternalService,
+  ) {}
 
   @Post()
   @RequirePermissions('insurance:manage')
@@ -40,6 +49,16 @@ export class InsuranceClaimController {
     return this.insuranceService.submitClaim(req.user, id);
   }
 
+  @Post(':id/manual-submission')
+  @RequirePermissions('insurance:manage')
+  recordManualSubmission(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Body() dto: ManualClaimSubmissionDto,
+  ) {
+    return this.claimExternalService.markClaimManuallySubmitted(req.user, id, dto);
+  }
+
   @Post(':id/review')
   @RequirePermissions('insurance:manage')
   review(@Request() req: any, @Param('id') id: string) {
@@ -61,6 +80,16 @@ export class InsuranceClaimController {
   @Post(':id/record-payment')
   @RequirePermissions('insurance:manage')
   recordPayment(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Body() dto: RecordClaimPaymentDto,
+  ) {
+    return this.insuranceService.recordClaimPayment(req.user, id, dto);
+  }
+
+  @Post(':id/settlement')
+  @RequirePermissions('insurance:manage')
+  recordSettlement(
     @Request() req: any,
     @Param('id') id: string,
     @Body() dto: RecordClaimPaymentDto,

@@ -55,15 +55,6 @@ export function tryCanonicalizePatientPhone(input: string): string | null {
   }
 }
 
-export function toWhatsAppRecipientId(canonicalPhone: string): string {
-  const canonical = canonicalizePatientPhone(canonicalPhone);
-  return canonical.slice(1);
-}
-
-export function inboundWaIdToCanonicalPhone(waId: string): string | null {
-  return tryCanonicalizePatientPhone(waId);
-}
-
 export function assertUniquePatientPhoneLookup<T extends { id: string }>(
   matches: T[],
   context: string,

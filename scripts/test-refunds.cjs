@@ -1,3 +1,5 @@
+const { loginBody } = require('./lib/login-body.cjs');
+const { ensureAdminPhase1Permissions } = require('./lib/ensure-admin-permissions.cjs');
 const crypto = require('crypto');
 const path = require('path');
 
@@ -102,11 +104,13 @@ async function main() {
   const prisma = new PrismaClient();
 
   const login = await request('POST', '/auth/login', {
-    body: { email: 'admin@test.com', password: 'MediOS@12345' },
+    body: loginBody('admin@test.com'),
   });
   const token = login.body?.accessToken;
   if (!token) { fail('login'); process.exit(1); }
   pass('login');
+
+  await ensureAdminPhase1Permissions(prisma, login.body.user.roleId);
 
   const patients = await request('GET', '/patients?limit=1', { token });
   const patientId = patients.body?.data?.[0]?.id;

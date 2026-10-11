@@ -1,6 +1,37 @@
 import { PrismaClient } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
+import { bootstrapHospitalRoleCatalogue } from '../src/roles/role-bootstrap.util';
+import {
+  bootstrapHospitalEnterprisePlan,
+  bootstrapPlanCatalogue,
+} from '../src/plans/plan-bootstrap.util';
+import { upsertDevelopmentIcd10Fixture } from '../src/clinical/icd10/icd10-development-fixture';
 
 const prisma = new PrismaClient();
+
+async function upsertPermission(name: string, description: string) {
+  return prisma.permission.upsert({
+    where: { name },
+    update: { description },
+    create: { name, description },
+  });
+}
+
+async function grantPermission(roleId: string, permissionId: string) {
+  await prisma.rolePermission.upsert({
+    where: {
+      roleId_permissionId: {
+        roleId,
+        permissionId,
+      },
+    },
+    update: {},
+    create: {
+      roleId,
+      permissionId,
+    },
+  });
+}
 
 async function main() {
   const hospital = await prisma.hospital.upsert({
@@ -131,16 +162,12 @@ async function main() {
     },
   });
 
-  const whatsappSendPermission = await prisma.permission.upsert({
-    where: {
-      name: 'whatsapp:send',
-    },
-    update: {
-      description: 'Send WhatsApp messages',
-    },
+  const engagementReadPermission = await prisma.permission.upsert({
+    where: { name: 'patients:engagement:read' },
+    update: { description: 'Read patient engagement and NPS' },
     create: {
-      name: 'whatsapp:send',
-      description: 'Send WhatsApp messages',
+      name: 'patients:engagement:read',
+      description: 'Read patient engagement and NPS',
     },
   });
 
@@ -148,26 +175,22 @@ async function main() {
     where: {
       roleId_permissionId: {
         roleId: role.id,
-        permissionId: whatsappSendPermission.id,
+        permissionId: engagementReadPermission.id,
       },
     },
     update: {},
     create: {
       roleId: role.id,
-      permissionId: whatsappSendPermission.id,
+      permissionId: engagementReadPermission.id,
     },
   });
 
-  const whatsappReadPermission = await prisma.permission.upsert({
-    where: {
-      name: 'whatsapp:read',
-    },
-    update: {
-      description: 'Read WhatsApp messages and conversations',
-    },
+  const engagementManagePermission = await prisma.permission.upsert({
+    where: { name: 'patients:engagement:manage' },
+    update: { description: 'Manage patient engagement actions and win-back' },
     create: {
-      name: 'whatsapp:read',
-      description: 'Read WhatsApp messages and conversations',
+      name: 'patients:engagement:manage',
+      description: 'Manage patient engagement actions and win-back',
     },
   });
 
@@ -175,13 +198,13 @@ async function main() {
     where: {
       roleId_permissionId: {
         roleId: role.id,
-        permissionId: whatsappReadPermission.id,
+        permissionId: engagementManagePermission.id,
       },
     },
     update: {},
     create: {
       roleId: role.id,
-      permissionId: whatsappReadPermission.id,
+      permissionId: engagementManagePermission.id,
     },
   });
 
@@ -431,6 +454,31 @@ async function main() {
     },
   });
 
+  const clinicalSafetyOverridePermission = await prisma.permission.upsert({
+    where: { name: 'clinical:safety_override' },
+    update: {
+      description: 'Override blocking prescription safety findings with documented reason',
+    },
+    create: {
+      name: 'clinical:safety_override',
+      description: 'Override blocking prescription safety findings with documented reason',
+    },
+  });
+
+  await prisma.rolePermission.upsert({
+    where: {
+      roleId_permissionId: {
+        roleId: role.id,
+        permissionId: clinicalSafetyOverridePermission.id,
+      },
+    },
+    update: {},
+    create: {
+      roleId: role.id,
+      permissionId: clinicalSafetyOverridePermission.id,
+    },
+  });
+
   const diagnosticsReadPermission = await prisma.permission.upsert({
     where: { name: 'diagnostics:read' },
     update: { description: 'View diagnostic orders and results' },
@@ -615,6 +663,98 @@ async function main() {
     },
   });
 
+  const insurancePreauthManagePermission = await prisma.permission.upsert({
+    where: { name: 'insurance:preauth:manage' },
+    update: { description: 'Manage insurance pre-authorizations' },
+    create: {
+      name: 'insurance:preauth:manage',
+      description: 'Manage insurance pre-authorizations',
+    },
+  });
+
+  await prisma.rolePermission.upsert({
+    where: {
+      roleId_permissionId: {
+        roleId: role.id,
+        permissionId: insurancePreauthManagePermission.id,
+      },
+    },
+    update: {},
+    create: {
+      roleId: role.id,
+      permissionId: insurancePreauthManagePermission.id,
+    },
+  });
+
+  const insuranceClaimsManagePermission = await prisma.permission.upsert({
+    where: { name: 'insurance:claims:manage' },
+    update: { description: 'Manage insurance claims lifecycle' },
+    create: {
+      name: 'insurance:claims:manage',
+      description: 'Manage insurance claims lifecycle',
+    },
+  });
+
+  await prisma.rolePermission.upsert({
+    where: {
+      roleId_permissionId: {
+        roleId: role.id,
+        permissionId: insuranceClaimsManagePermission.id,
+      },
+    },
+    update: {},
+    create: {
+      roleId: role.id,
+      permissionId: insuranceClaimsManagePermission.id,
+    },
+  });
+
+  const insuranceReportsReadPermission = await prisma.permission.upsert({
+    where: { name: 'insurance:reports:read' },
+    update: { description: 'View insurance reports' },
+    create: {
+      name: 'insurance:reports:read',
+      description: 'View insurance reports',
+    },
+  });
+
+  await prisma.rolePermission.upsert({
+    where: {
+      roleId_permissionId: {
+        roleId: role.id,
+        permissionId: insuranceReportsReadPermission.id,
+      },
+    },
+    update: {},
+    create: {
+      roleId: role.id,
+      permissionId: insuranceReportsReadPermission.id,
+    },
+  });
+
+  const insuranceReportsExportPermission = await prisma.permission.upsert({
+    where: { name: 'insurance:reports:export' },
+    update: { description: 'Export insurance reports' },
+    create: {
+      name: 'insurance:reports:export',
+      description: 'Export insurance reports',
+    },
+  });
+
+  await prisma.rolePermission.upsert({
+    where: {
+      roleId_permissionId: {
+        roleId: role.id,
+        permissionId: insuranceReportsExportPermission.id,
+      },
+    },
+    update: {},
+    create: {
+      roleId: role.id,
+      permissionId: insuranceReportsExportPermission.id,
+    },
+  });
+
   const surgeryReadPermission = await prisma.permission.upsert({
     where: { name: 'surgery:read' },
     update: { description: 'View surgery requests, schedules, and records' },
@@ -661,11 +801,150 @@ async function main() {
     },
   });
 
+  const phase1Permissions: Array<{ name: string; description: string }> = [
+    { name: 'billing:read', description: 'View invoices and billing records' },
+    { name: 'billing:manage', description: 'Create and update invoices' },
+    { name: 'payments:read', description: 'View payment records' },
+    { name: 'payments:manage', description: 'Initiate and manage payments' },
+    { name: 'refunds:read', description: 'View refund records' },
+    { name: 'refunds:manage', description: 'Initiate and manage refunds' },
+    {
+      name: 'refunds:approve',
+      description: 'Approve or reject refund requests',
+    },
+    {
+      name: 'scheduling:read',
+      description: 'View scheduling resources and appointments',
+    },
+    {
+      name: 'scheduling:manage',
+      description: 'Manage scheduling resources and appointments',
+    },
+    { name: 'attendance:read', description: 'View attendance records' },
+    { name: 'attendance:manage', description: 'Manage attendance clock events' },
+    {
+      name: 'attendance:export',
+      description: 'Export payroll-ready attendance summaries',
+    },
+    { name: 'roster:read', description: 'View roster entries' },
+    { name: 'roster:manage', description: 'Manage roster entries' },
+    { name: 'work-schedules:read', description: 'View work schedules' },
+    { name: 'work-schedules:manage', description: 'Manage work schedules' },
+    { name: 'booking-rules:read', description: 'View booking rules' },
+    { name: 'booking-rules:manage', description: 'Manage booking rules' },
+    { name: 'leave:read', description: 'View provider leave' },
+    { name: 'leave:manage', description: 'Manage provider leave' },
+    { name: 'audit:read', description: 'View hospital audit logs' },
+    { name: 'audit:export', description: 'Export hospital audit logs' },
+    { name: 'reports:read', description: 'View financial and GST reports' },
+    { name: 'reports:export', description: 'Export financial and GST reports' },
+    {
+      name: 'staff-notifications:read',
+      description: 'View in-app staff notifications',
+    },
+    {
+      name: 'staff-notifications:manage',
+      description: 'Mark staff notifications read',
+    },
+    {
+      name: 'notifications:delivery:read',
+      description: 'View internal notification delivery statistics',
+    },
+    { name: 'hospitals:read', description: 'View hospital profile' },
+    { name: 'hospitals:manage', description: 'Update hospital profile' },
+    { name: 'branches:read', description: 'View branches' },
+    { name: 'branches:manage', description: 'Create and manage branches' },
+  ];
+
+  for (const entry of phase1Permissions) {
+    const permission = await upsertPermission(entry.name, entry.description);
+    await grantPermission(role.id, permission.id);
+  }
+
+  const rbacPermissions = [
+    { name: 'roles:read', description: 'View roles and permission catalogue' },
+    { name: 'roles:manage', description: 'Create and manage roles and permissions' },
+    { name: 'users:read', description: 'View users for role assignment' },
+    { name: 'users:manage', description: 'Assign roles to users' },
+    { name: 'plans:read', description: 'View subscription plans and hospital plan assignment' },
+    { name: 'plans:manage', description: 'Manage plans and hospital plan assignment' },
+  ];
+
+  for (const entry of rbacPermissions) {
+    const permission = await upsertPermission(entry.name, entry.description);
+    await grantPermission(role.id, permission.id);
+  }
+
+  const patientPrivacyPermission = await upsertPermission(
+    'patients:privacy:manage',
+    'Approve and execute patient privacy erasure',
+  );
+  await grantPermission(role.id, patientPrivacyPermission.id);
+
+  const receptionistPermissionNames = [
+    'patients:read',
+    'patients:create',
+    'patients:update',
+    'opd:read',
+    'opd:manage',
+    'scheduling:read',
+    'billing:read',
+    'payments:read',
+  ];
+
+  for (const permissionName of receptionistPermissionNames) {
+    const permission = await prisma.permission.findUnique({
+      where: { name: permissionName },
+    });
+    if (permission) {
+      await grantPermission(receptionistRole.id, permission.id);
+    }
+  }
+
+  const demoPassword =
+    process.env.SEED_ADMIN_PASSWORD?.trim() || 'MediOS@12345';
+  const passwordHash = await bcrypt.hash(demoPassword, 12);
+
+  await prisma.user.upsert({
+    where: {
+      hospitalId_email: {
+        hospitalId: hospital.id,
+        email: 'admin@test.com',
+      },
+    },
+    update: {
+      roleId: role.id,
+      name: 'Demo Admin',
+      passwordHash,
+      status: 'ACTIVE',
+    },
+    create: {
+      hospitalId: hospital.id,
+      roleId: role.id,
+      email: 'admin@test.com',
+      name: 'Demo Admin',
+      passwordHash,
+      status: 'ACTIVE',
+    },
+  });
+
+  const bootstrapResult = await bootstrapHospitalRoleCatalogue(prisma, hospital.id);
+
+  await bootstrapPlanCatalogue(prisma);
+  await bootstrapHospitalEnterprisePlan(prisma, hospital.id);
+
+  // DEVELOPMENT FIXTURE ONLY — not a complete WHO ICD-10 catalogue.
+  await upsertDevelopmentIcd10Fixture(prisma);
+
   console.log('Development seed complete');
   console.log({
     hospitalId: hospital.id,
+    hospitalCode: hospital.code,
     adminRoleId: role.id,
     receptionistRoleId: receptionistRole.id,
+    demoAdminEmail: 'admin@test.com',
+    bootstrapCreatedRoles: bootstrapResult.createdRoleNames,
+    bootstrapSkippedRoles: bootstrapResult.skippedExistingRoleNames,
   });
 }
 

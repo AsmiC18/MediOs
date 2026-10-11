@@ -12,9 +12,13 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { DiagnosticsService } from './diagnostics.service';
 import { EnterResultDto } from './dto/enter-result.dto';
+import { FeatureGuard } from '../plans/feature.guard';
+import { RequireFeature } from '../plans/require-feature.decorator';
+import { FeatureKey } from '../plans/feature-keys';
 
 @Controller('diagnostics/order-items')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard, FeatureGuard)
+@RequireFeature(FeatureKey.DIAGNOSTICS)
 export class DiagnosticOrderItemController {
   constructor(private readonly diagnosticsService: DiagnosticsService) {}
 

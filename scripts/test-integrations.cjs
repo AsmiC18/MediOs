@@ -1,11 +1,12 @@
 const bcrypt = require('bcrypt');
+const { loginBody } = require('./lib/login-body.cjs');
+const { ensureAdminPhase1Permissions } = require('./lib/ensure-admin-permissions.cjs');
 const crypto = require('crypto');
 const path = require('path');
 
 const { PrismaClient } = require(path.join(__dirname, '..', 'node_modules', '@prisma/client'));
 
 const BASE = 'http://localhost:3000';
-const APP_SECRET = 'test_whatsapp_app_secret';
 const runId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 const uniqueSuffix = runId.replace(/[^a-zA-Z0-9]/g, '').slice(-16);
 const results = [];
@@ -94,7 +95,7 @@ async function main() {
   let slot = 0;
 
   const login = await request('POST', '/auth/login', {
-    body: { email: 'admin@test.com', password: 'MediOS@12345' },
+    body: loginBody('admin@test.com'),
   });
   const token = login.body?.accessToken;
   const hospitalId = login.body?.user?.hospitalId;
@@ -103,6 +104,8 @@ async function main() {
     fail('login');
     process.exit(1);
   }
+  await ensureAdminPhase1Permissions(prisma, login.body.user.roleId);
+
 
   const branch = await setupBranch(prisma, hospitalId, uniqueSuffix.slice(0, 6));
   const doctor = await request('POST', '/resources', {
@@ -357,8 +360,8 @@ async function main() {
   else fail('10 clinical encounter → diagnostic order');
   if (history.status === 200 && history.body?.orders?.length >= 1) pass('11 diagnostic result history');
   else fail('11 diagnostic result history', `${history.status} ${JSON.stringify(history.body)?.slice(0, 120)}`);
-  if (waAfterLab === 0) pass('11b diagnostics WhatsApp hook does not send messages');
-  else fail('11b diagnostics WhatsApp hook does not send messages', `count=${waAfterLab}`);
+  if (waAfterLab === 0) pass('11b diagnostics completion creates no WhatsAppMessage rows');
+  else fail('11b diagnostics completion creates no WhatsAppMessage rows', `count=${waAfterLab}`);
 
   // 12–15. Surgery
   const surgPatient = await createPatient(token, 'Surg');

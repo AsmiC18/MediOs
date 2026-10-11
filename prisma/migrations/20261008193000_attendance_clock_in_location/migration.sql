@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "Attendance" ADD COLUMN IF NOT EXISTS "clockInLatitude" DOUBLE PRECISION,
+ADD COLUMN IF NOT EXISTS "clockInLongitude" DOUBLE PRECISION,
+ADD COLUMN IF NOT EXISTS "clockInLocationLabel" TEXT;

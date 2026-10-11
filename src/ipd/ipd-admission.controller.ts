@@ -16,9 +16,13 @@ import { AllocateBedDto } from './dto/allocate-bed.dto';
 import { CreateAdmissionDto } from './dto/create-admission.dto';
 import { TransferBedDto } from './dto/transfer-bed.dto';
 import { IpdAdmissionService } from './ipd-admission.service';
+import { FeatureGuard } from '../plans/feature.guard';
+import { RequireFeature } from '../plans/require-feature.decorator';
+import { FeatureKey } from '../plans/feature-keys';
 
 @Controller('ipd/admissions')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard, FeatureGuard)
+@RequireFeature(FeatureKey.IPD)
 export class IpdAdmissionController {
   constructor(private readonly admissionService: IpdAdmissionService) {}
 

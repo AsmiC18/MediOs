@@ -1,4 +1,5 @@
 const bcrypt = require('bcrypt');
+const { loginBody } = require('./lib/login-body.cjs');
 const crypto = require('crypto');
 const path = require('path');
 const jwt = require(path.join(__dirname, '..', 'node_modules', 'jsonwebtoken'));
@@ -309,11 +310,15 @@ async function setupOtherHospital(prisma, adminUserId) {
   };
 }
 
+const { ensureAdminPhase1Permissions } = require('./lib/ensure-admin-permissions.cjs');
+
 async function main() {
   const prisma = new PrismaClient();
+  process.env.LOGIN_RATE_LIMIT_MAX_ATTEMPTS =
+    process.env.LOGIN_RATE_LIMIT_MAX_ATTEMPTS || '200';
 
   const login = await request('POST', '/auth/login', {
-    body: { email: 'admin@test.com', password: 'MediOS@12345' },
+    body: loginBody('admin@test.com'),
   });
   const token = login.body?.accessToken;
   const hospitalId = login.body?.user?.hospitalId;
@@ -321,6 +326,17 @@ async function main() {
   if (!token || !hospitalId) {
     fail('setup login');
     process.exit(1);
+  }
+
+  await ensureAdminPhase1Permissions(prisma, login.body.user.roleId);
+
+  const wrongHospitalLogin = await request('POST', '/auth/login', {
+    body: loginBody('admin@test.com', 'MediOS@12345', 'NONEXISTENT-HOSPITAL'),
+  });
+  if (wrongHospitalLogin.status === 401) {
+    pass('38 login scoped by hospital code', '401');
+  } else {
+    fail('38 login scoped by hospital code', `${wrongHospitalLogin.status}`);
   }
 
   const branch = await prisma.branch.upsert({
@@ -331,9 +347,18 @@ async function main() {
 
   const other = await setupOtherHospital(prisma, adminUserId);
   const otherLogin = await request('POST', '/auth/login', {
-    body: { email: other.user.email, password: 'MediOS@12345' },
+    body: loginBody(other.user.email, 'MediOS@12345', other.hospital.code),
   });
   const otherToken = otherLogin.body?.accessToken;
+
+  const crossHospitalLogin = await request('POST', '/auth/login', {
+    body: loginBody('admin@test.com', 'MediOS@12345', other.hospital.code),
+  });
+  if (crossHospitalLogin.status === 401) {
+    pass('39 login rejects email in wrong hospital', '401');
+  } else {
+    fail('39 login rejects email in wrong hospital', `${crossHospitalLogin.status}`);
+  }
 
   // --- Authentication ---
   const noToken = await request('GET', '/patients');
@@ -344,7 +369,7 @@ async function main() {
   if (badToken.status === 401) pass('2 invalid token rejected', '401');
   else fail('2 invalid token rejected', `${badToken.status}`);
 
-  const jwtSecret = process.env.JWT_SECRET || 'dev-secret-change-me';
+  const jwtSecret = process.env.JWT_SECRET;
   const expiredToken = jwt.sign(
     { sub: adminUserId, hospitalId, roleId: login.body.user.roleId, role: 'ADMIN' },
     jwtSecret,
@@ -368,7 +393,7 @@ async function main() {
     },
   });
   const limitedLogin = await request('POST', '/auth/login', {
-    body: { email: limitedUser.email, password: 'MediOS@12345' },
+    body: loginBody(limitedUser.email),
   });
   const limitedToken = limitedLogin.body?.accessToken;
   const noPerm = await request('GET', '/clinical/encounters', { token: limitedToken });
@@ -393,6 +418,105 @@ async function main() {
     pass('5 read vs manage permission', '200/403');
   } else {
     fail('5 read vs manage permission', `${readOnly.status}/${writeDenied.status}`);
+  }
+
+  const billingDenied = await request('GET', '/invoices', { token: limitedToken });
+  if (billingDenied.status === 403) pass('5b billing permission enforced', '403');
+  else fail('5b billing permission enforced', `${billingDenied.status}`);
+
+  await prisma.permission.upsert({
+    where: { name: 'billing:read' },
+    update: {},
+    create: { name: 'billing:read', description: 'billing read' },
+  });
+  const billingReadPerm = await prisma.permission.findUnique({
+    where: { name: 'billing:read' },
+  });
+  await prisma.rolePermission.upsert({
+    where: {
+      roleId_permissionId: {
+        roleId: limitedRole.id,
+        permissionId: billingReadPerm.id,
+      },
+    },
+    update: {},
+    create: { roleId: limitedRole.id, permissionId: billingReadPerm.id },
+  });
+  const billingReadOk = await request('GET', '/invoices', { token: limitedToken });
+  const billingWriteDenied = await request('POST', '/invoices', {
+    token: limitedToken,
+    body: {
+      patientId: (await createPatient(token)).id,
+      items: [{ description: 'RBAC', quantity: 1, unitPrice: 100 }],
+    },
+  });
+  if (billingReadOk.status === 200 && billingWriteDenied.status === 403) {
+    pass('5c billing read vs manage', '200/403');
+  } else {
+    fail('5c billing read vs manage', `${billingReadOk.status}/${billingWriteDenied.status}`);
+  }
+
+  const receptionistRole = await prisma.role.upsert({
+    where: {
+      hospitalId_name: { hospitalId, name: 'RECEPTIONIST' },
+    },
+    update: {},
+    create: { hospitalId, name: 'RECEPTIONIST', description: 'Reception' },
+  });
+  const receptionistPerms = [
+    'patients:read',
+    'patients:create',
+    'opd:read',
+    'scheduling:read',
+    'billing:read',
+  ];
+  for (const permName of receptionistPerms) {
+    const perm = await prisma.permission.upsert({
+      where: { name: permName },
+      update: {},
+      create: { name: permName, description: permName },
+    });
+    await prisma.rolePermission.upsert({
+      where: {
+        roleId_permissionId: {
+          roleId: receptionistRole.id,
+          permissionId: perm.id,
+        },
+      },
+      update: {},
+      create: { roleId: receptionistRole.id, permissionId: perm.id },
+    });
+  }
+  const receptionistUser = await prisma.user.create({
+    data: {
+      hospitalId,
+      roleId: receptionistRole.id,
+      name: 'Reception Test',
+      email: `reception-${uniqueSuffix}@test.com`,
+      passwordHash: await bcrypt.hash('MediOS@12345', 12),
+    },
+  });
+  const receptionistLogin = await request('POST', '/auth/login', {
+    body: loginBody(receptionistUser.email),
+  });
+  const receptionistToken = receptionistLogin.body?.accessToken;
+  const receptionistPatients = await request('GET', '/patients', {
+    token: receptionistToken,
+  });
+  const receptionistInvoiceWrite = await request('POST', '/invoices', {
+    token: receptionistToken,
+    body: {
+      patientId: (await createPatient(token)).id,
+      items: [{ description: 'Denied', quantity: 1, unitPrice: 50 }],
+    },
+  });
+  if (receptionistPatients.status === 200 && receptionistInvoiceWrite.status === 403) {
+    pass('5d receptionist read-only billing', '200/403');
+  } else {
+    fail(
+      '5d receptionist read-only billing',
+      `${receptionistPatients.status}/${receptionistInvoiceWrite.status}`,
+    );
   }
 
   // --- Tenant isolation ---
@@ -422,8 +546,8 @@ async function main() {
   const crossWa = await request('GET', `/patients/${other.patient.id}/whatsapp/conversation`, {
     token,
   });
-  if (crossWa.status === 404) pass('12d cross-hospital WhatsApp blocked', '404');
-  else fail('12d cross-hospital WhatsApp blocked', `${crossWa.status}`);
+  if (crossWa.status === 404) pass('12d WhatsApp staff HTTP route absent', '404');
+  else fail('12d WhatsApp staff HTTP route absent', `${crossWa.status}`);
 
   // --- Validation ---
   const badUuid = await request('GET', '/patients/not-a-uuid', { token });
@@ -889,8 +1013,8 @@ async function main() {
   const waLookup = await prisma.patient.findMany({
     where: { hospitalId, phone: waPat.phone },
   });
-  if (waLookup.length === 1) pass('32 WhatsApp/patient single canonical resolution', waPat.phone);
-  else fail('32 WhatsApp/patient resolution', `count=${waLookup.length}`);
+  if (waLookup.length === 1) pass('32 patient phone single canonical resolution', waPat.phone);
+  else fail('32 patient phone canonical resolution', `count=${waLookup.length}`);
 
   // --- Webhooks ---
   const dupEventId = `evt_dup_sec_${runId}`;
@@ -931,51 +1055,21 @@ async function main() {
   if (badSig.status === 401) pass('35 invalid Razorpay webhook signature', '401');
   else fail('35 invalid Razorpay webhook signature', `${badSig.status}`);
 
-  const waEventId = `wamid.sec.${runId}`;
-  const waPayload = {
-    object: 'whatsapp_business_account',
-    entry: [
-      {
-        id: '123',
-        changes: [
-          {
-            field: 'messages',
-            value: {
-              metadata: { phone_number_id: 'test_whatsapp_phone_number_id' },
-              messages: [
-                {
-                  id: waEventId,
-                  from: waPat.phone.replace('+', ''),
-                  timestamp: `${Math.floor(Date.now() / 1000)}`,
-                  type: 'text',
-                  text: { body: 'Security test inbound' },
-                },
-              ],
-            },
-          },
-        ],
-      },
-    ],
-  };
-  const waRaw = JSON.stringify(waPayload);
-  const wa1 = await request('POST', '/webhooks/whatsapp', {
+  const waRaw = JSON.stringify({ object: 'whatsapp_business_account', entry: [] });
+  const waWebhook = await request('POST', '/webhooks/whatsapp', {
     body: waRaw,
     headers: { 'x-hub-signature-256': signWhatsAppWebhook(waRaw) },
   });
-  const wa2 = await request('POST', '/webhooks/whatsapp', {
-    body: waRaw,
-    headers: { 'x-hub-signature-256': signWhatsAppWebhook(waRaw) },
-  });
-  const waInboundCount = await prisma.whatsAppMessage.count({
-    where: { providerMessageId: waEventId },
-  });
-  if ((wa1.status === 200 || wa1.status === 201) && waInboundCount === 1) {
-    pass('34 duplicate WhatsApp webhook idempotent', `messages=${waInboundCount}`);
+  if (waWebhook.status === 404) {
+    pass('34 WhatsApp webhook route absent', '404');
   } else {
-    fail('34 duplicate WhatsApp webhook', `${wa1.status}/${wa2.status} count=${waInboundCount}`);
+    fail('34 WhatsApp webhook route absent', `${waWebhook.status}`);
   }
 
   // --- Audit ---
+  const auditPatient = await createPatient(token, 'AUD');
+  await request('GET', `/patients/${auditPatient.id}`, { token });
+
   const recentAudits = await prisma.auditLog.findMany({
     where: { hospitalId, createdAt: { gte: new Date(Date.now() - 120000) } },
     take: 50,
@@ -991,6 +1085,24 @@ async function main() {
   const leaked = forbidden.filter((k) => auditBlob.toLowerCase().includes(k.toLowerCase()));
   if (leaked.length === 0) pass('37 secrets/clinical payloads absent from audit metadata');
   else fail('37 audit metadata leak', leaked.join(','));
+
+  const patientReadAudit = recentAudits.some((a) => a.action === 'PATIENT_READ');
+  if (patientReadAudit) pass('37b patient read audited');
+  else fail('37b patient read audited', 'missing PATIENT_READ');
+
+  const rateLimitEmail = `rate-${uniqueSuffix}@test.com`;
+  let saw429 = false;
+  for (let i = 0; i < 25; i++) {
+    const attempt = await request('POST', '/auth/login', {
+      body: loginBody(rateLimitEmail, 'wrong-password-123'),
+    });
+    if (attempt.status === 429) {
+      saw429 = true;
+      break;
+    }
+  }
+  if (saw429) pass('40 login rate limit triggers', '429');
+  else fail('40 login rate limit triggers', 'no 429 observed');
 
   // cleanup other hospital
   await prisma.whatsAppConversation.deleteMany({ where: { hospitalId: other.hospital.id } }).catch(() => {});

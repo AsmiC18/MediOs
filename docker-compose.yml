@@ -1,35 +1,145 @@
 services:
+
   postgres:
+
     image: postgres:16-alpine
+
     container_name: medios-postgres
+
     restart: unless-stopped
+
     environment:
-      POSTGRES_USER: medios
-      POSTGRES_PASSWORD: medios
-      POSTGRES_DB: medios
+
+      POSTGRES_USER: ${POSTGRES_USER:-medios}
+
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env or the shell}
+
+      POSTGRES_DB: ${POSTGRES_DB:-medios}
+
     ports:
-      - "5433:5432"
+
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+
     volumes:
+
       - medios_pgdata:/var/lib/postgresql/data
+
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U medios -d medios"]
+
+      test:
+
+        [
+
+          "CMD-SHELL",
+
+          "pg_isready -U ${POSTGRES_USER:-medios} -d ${POSTGRES_DB:-medios}",
+
+        ]
+
       interval: 5s
+
       timeout: 5s
+
       retries: 10
 
+
+
   api:
+
     build: .
+
     container_name: medios-api
+
     restart: unless-stopped
+
     ports:
-      - "3000:3000"
+
+      - "${API_HOST_PORT:-3000}:3000"
+
+    env_file:
+
+      - .env.docker
+
     environment:
+
       NODE_ENV: production
+
       PORT: 3000
-      DATABASE_URL: postgresql://medios:medios@postgres:5432/medios?schema=public
+
+      DATABASE_URL: postgresql://${POSTGRES_USER:-medios}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-medios}?schema=public
+
+      CLINICAL_STORAGE_LOCAL_ROOT: /var/lib/medios/clinical-storage
+
+    volumes:
+
+      - medios_clinical_storage:/var/lib/medios/clinical-storage
+
+    command: ["node", "dist/src/main.js"]
+
     depends_on:
+
       postgres:
+
         condition: service_healthy
 
+    healthcheck:
+
+      test:
+
+        [
+
+          "CMD",
+
+          "node",
+
+          "-e",
+
+          "fetch('http://127.0.0.1:3000/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+
+        ]
+
+      interval: 15s
+
+      timeout: 5s
+
+      retries: 5
+
+      start_period: 45s
+
+
+
+  worker:
+
+    build: .
+
+    container_name: medios-worker
+
+    restart: unless-stopped
+
+    env_file:
+
+      - .env.docker
+
+    environment:
+
+      NODE_ENV: production
+
+      DATABASE_URL: postgresql://${POSTGRES_USER:-medios}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-medios}?schema=public
+
+    command: ["node", "dist/src/worker.js"]
+
+    depends_on:
+
+      postgres:
+
+        condition: service_healthy
+
+
+
 volumes:
+
   medios_pgdata:
+
+  medios_clinical_storage:
+
+

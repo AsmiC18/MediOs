@@ -1,4 +1,7 @@
-import { PatientInsurancePolicyStatus } from '@prisma/client';
+import {
+  InsuranceCopayType,
+  PatientInsurancePolicyStatus,
+} from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   IsDateString,
@@ -52,6 +55,20 @@ export class CreatePolicyDto {
   @Min(0)
   @Type(() => Number)
   sumInsured?: number;
+
+  @IsEnum(InsuranceCopayType)
+  @IsOptional()
+  copayType?: InsuranceCopayType;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Type(() => Number)
+  copayValue?: number;
+
+  @IsUUID()
+  @IsOptional()
+  empanelmentId?: string;
 }
 
 export class UpdatePolicyDto {

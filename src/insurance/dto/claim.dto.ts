@@ -61,6 +61,11 @@ export class RecordClaimPaymentDto {
   @Min(0.01)
   @Type(() => Number)
   paidAmount: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(128)
+  idempotencyKey?: string;
 }
 
 export class ClaimQueryDto {

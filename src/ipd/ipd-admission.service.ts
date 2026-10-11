@@ -11,6 +11,11 @@ import {
   Prisma,
 } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
+import {
+  applyBranchScope,
+  assertBranchAccess,
+  resolveCreateBranchId,
+} from '../common/auth/branch-scope.util';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { AdmissionQueryDto } from './dto/admission-query.dto';
 import { AllocateBedDto } from './dto/allocate-bed.dto';
@@ -23,6 +28,8 @@ import {
   occupyBed,
   releaseBed,
 } from './utils/bed-lock.util';
+import { isActiveAdmissionUniqueViolation } from './utils/admission-unique.util';
+import { DepartmentBillingEnqueueService } from '../billing/department/department-billing-enqueue.service';
 
 type AuthenticatedUser = {
   sub: string;
@@ -63,6 +70,7 @@ export class IpdAdmissionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly departmentBillingEnqueue?: DepartmentBillingEnqueueService,
   ) {}
 
   private formatAdmission(
@@ -136,6 +144,10 @@ export class IpdAdmissionService {
       throw new BadRequestException('Patient record is not active');
     }
 
+    if (patient.branchId != null) {
+      assertBranchAccess(user, patient.branchId);
+    }
+
     return patient;
   }
 
@@ -189,6 +201,8 @@ export class IpdAdmissionService {
       throw new NotFoundException('Admission not found');
     }
 
+    assertBranchAccess(user, admission.branchId);
+
     return admission;
   }
 
@@ -208,6 +222,8 @@ export class IpdAdmissionService {
     if (bed.branchId !== branchId) {
       throw new BadRequestException('Bed must belong to the same branch as the admission');
     }
+
+    assertBranchAccess(user, bed.branchId);
 
     return bed;
   }
@@ -253,11 +269,17 @@ export class IpdAdmissionService {
 
   async createAdmission(user: AuthenticatedUser, dto: CreateAdmissionDto) {
     await this.validatePatient(user, dto.patientId);
-    await this.validateBranch(user, dto.branchId);
+    const branchId = resolveCreateBranchId(user, dto.branchId);
+
+    if (!branchId) {
+      throw new BadRequestException('branchId is required');
+    }
+
+    await this.validateBranch(user, branchId);
     await this.assertNoActiveAdmission(user.hospitalId, dto.patientId);
 
     if (dto.bedId) {
-      await this.validateBedForBranch(user, dto.bedId, dto.branchId);
+      await this.validateBedForBranch(user, dto.bedId, branchId);
     }
 
     let admission;
@@ -273,7 +295,7 @@ export class IpdAdmissionService {
           const created = await tx.ipdAdmission.create({
             data: {
               hospitalId: user.hospitalId,
-              branchId: dto.branchId,
+              branchId,
               patientId: dto.patientId,
               admissionNumber,
               reason: dto.reason,
@@ -298,6 +320,12 @@ export class IpdAdmissionService {
         });
         break;
       } catch (error) {
+        if (isActiveAdmissionUniqueViolation(error)) {
+          throw new ConflictException(
+            'Patient already has an active admission at this hospital',
+          );
+        }
+
         if (
           error instanceof Prisma.PrismaClientKnownRequestError &&
           error.code === 'P2002' &&
@@ -349,13 +377,23 @@ export class IpdAdmissionService {
   }
 
   async listAdmissions(user: AuthenticatedUser, query: AdmissionQueryDto = {}) {
+    if (user.branchId == null && query.branchId) {
+      await this.validateBranch(user, query.branchId);
+    }
+
+    if (query.patientId) {
+      await this.validatePatient(user, query.patientId);
+    }
+
+    const where = applyBranchScope(user, {
+      hospitalId: user.hospitalId,
+      ...(query.branchId !== undefined && { branchId: query.branchId }),
+      ...(query.patientId !== undefined && { patientId: query.patientId }),
+      ...(query.status !== undefined && { status: query.status }),
+    });
+
     const admissions = await this.prisma.ipdAdmission.findMany({
-      where: {
-        hospitalId: user.hospitalId,
-        ...(query.branchId !== undefined && { branchId: query.branchId }),
-        ...(query.patientId !== undefined && { patientId: query.patientId }),
-        ...(query.status !== undefined && { status: query.status }),
-      },
+      where,
       include: admissionInclude,
       orderBy: { admissionDate: 'desc' },
     });

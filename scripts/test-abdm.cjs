@@ -1,4 +1,7 @@
 const bcrypt = require('bcrypt');
+const { loginBody } = require('./lib/login-body.cjs');
+const { ensureAdminPhase1Permissions } = require('./lib/ensure-admin-permissions.cjs');
+const { testPhone } = require('./lib/test-phone.cjs');
 const path = require('path');
 
 const { PrismaClient } = require(path.join(__dirname, '..', 'node_modules', '@prisma/client'));
@@ -40,7 +43,7 @@ async function main() {
   const prisma = new PrismaClient();
 
   const login = await request('POST', '/auth/login', {
-    body: { email: 'admin@test.com', password: 'MediOS@12345' },
+    body: loginBody('admin@test.com'),
   });
   const token = login.body?.accessToken;
   const adminUserId = login.body?.user?.id;
@@ -49,6 +52,8 @@ async function main() {
     process.exit(1);
   }
   pass('login');
+
+  await ensureAdminPhase1Permissions(prisma, login.body.user.roleId);
 
   const envRes = await request('GET', '/abdm/environment', { token });
   if (envRes.status === 200 && envRes.body?.mockMode === true) {
@@ -111,7 +116,7 @@ async function main() {
     fail('6 reject cross-hospital HPR access', `${crossHpr.status}`);
   }
 
-  const patientPhone = `${Date.now()}`.slice(-10);
+  const patientPhone = testPhone('9');
   const patientCreate = await request('POST', '/patients', {
     token,
     body: {
@@ -234,8 +239,15 @@ async function main() {
     },
   });
 
-  const otherRole = await prisma.role.create({
-    data: {
+  const otherRole = await prisma.role.upsert({
+    where: {
+      hospitalId_name: {
+        hospitalId: otherHospital.id,
+        name: `ADMIN-${runId.slice(0, 4)}`,
+      },
+    },
+    update: {},
+    create: {
       hospitalId: otherHospital.id,
       name: `ADMIN-${runId.slice(0, 4)}`,
       description: 'Isolation admin',
@@ -259,7 +271,7 @@ async function main() {
         await prisma.patient.create({
           data: {
             hospitalId: otherHospital.id,
-            phone: `9${Date.now()}`.slice(-10),
+            phone: testPhone('9'),
             firstName: 'Other',
             lastName: 'Patient',
           },
@@ -279,26 +291,42 @@ async function main() {
     fail('17 tenant isolation for consent', `${tenantIsolation.status}`);
   }
 
-  const limitedRole = await prisma.role.create({
-    data: {
+  const limitedRoleName = `NO-ABDM-${runId.replace(/[^a-zA-Z0-9]/g, '').slice(-12)}`;
+  const limitedRole = await prisma.role.upsert({
+    where: {
+      hospitalId_name: {
+        hospitalId: login.body.user.hospitalId,
+        name: limitedRoleName,
+      },
+    },
+    update: {},
+    create: {
       hospitalId: login.body.user.hospitalId,
-      name: `NO-ABDM-${runId.slice(0, 4)}`,
+      name: limitedRoleName,
       description: 'No ABDM permissions',
     },
   });
 
-  const limitedUser = await prisma.user.create({
-    data: {
+  const limitedUserEmail = `no-abdm-${runId.replace(/[^a-zA-Z0-9]/g, '')}@test.com`;
+  const limitedUser = await prisma.user.upsert({
+    where: {
+      hospitalId_email: {
+        hospitalId: login.body.user.hospitalId,
+        email: limitedUserEmail,
+      },
+    },
+    update: { roleId: limitedRole.id },
+    create: {
       hospitalId: login.body.user.hospitalId,
       roleId: limitedRole.id,
       name: 'Limited User',
-      email: `no-abdm-${runId}@test.com`,
+      email: limitedUserEmail,
       passwordHash: await bcrypt.hash('MediOS@12345', 12),
     },
   });
 
   const limitedLogin = await request('POST', '/auth/login', {
-    body: { email: limitedUser.email, password: 'MediOS@12345' },
+    body: loginBody(limitedUser.email),
   });
   const limitedToken = limitedLogin.body?.accessToken;
 
@@ -436,7 +464,7 @@ async function main() {
     fail('Day 2 service tests', error?.message || String(error));
   }
 
-  const callbackPatientPhone = `8${Date.now()}`.slice(-10);
+  const callbackPatientPhone = testPhone('8');
   const callbackPatientCreate = await request('POST', '/patients', {
     token,
     body: {
@@ -544,7 +572,7 @@ async function main() {
     const crossHospitalCallbackPatient = await prisma.patient.create({
       data: {
         hospitalId: otherHospital.id,
-        phone: `7${Date.now()}`.slice(-10),
+        phone: testPhone('7'),
         firstName: 'Cross',
         lastName: 'Hospital',
         dateOfBirth: new Date('1992-01-01'),
@@ -753,7 +781,7 @@ async function main() {
   }
 
   // --- Day 4: Consent Manager foundation ---
-  const consentPatientPhone = `6${Date.now()}`.slice(-10);
+  const consentPatientPhone = testPhone('6');
   const consentPatientCreate = await request('POST', '/patients', {
     token,
     body: {
@@ -802,7 +830,7 @@ async function main() {
     fail('53 grant consent REQUESTED -> GRANTED', `${grantConsent.status} ${JSON.stringify(grantConsent.body)}`);
   }
 
-  const denyConsentPatientPhone = `5${Date.now()}`.slice(-10);
+  const denyConsentPatientPhone = testPhone('5');
   const denyPatient = await request('POST', '/patients', {
     token,
     body: {
@@ -839,7 +867,7 @@ async function main() {
     fail('55 revoke consent GRANTED -> REVOKED', `${revokeConsent.status} ${JSON.stringify(revokeConsent.body)}`);
   }
 
-  const expiredPatientPhone = `4${Date.now()}`.slice(-10);
+  const expiredPatientPhone = testPhone('4');
   const expiredPatient = await request('POST', '/patients', {
     token,
     body: {
@@ -902,7 +930,7 @@ async function main() {
   const otherPatientForConsent = await prisma.patient.create({
     data: {
       hospitalId: otherHospital.id,
-      phone: `3${Date.now()}`.slice(-10),
+      phone: testPhone('3'),
       firstName: 'Other',
       lastName: 'ConsentPatient',
     },

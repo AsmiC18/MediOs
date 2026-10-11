@@ -16,6 +16,12 @@ import {
   RefundStatus,
 } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
+import {
+  applyBranchScope,
+  assertBranchAccess,
+  resolveCreateBranchId,
+  resolveUpdateBranchId,
+} from '../common/auth/branch-scope.util';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { InvoiceQueryDto } from './dto/invoice-query.dto';
@@ -26,11 +32,16 @@ import {
   computeGstInvoice,
   GstItemInput,
   hasTaxedItems,
+  isValidHsnSacValue,
+  isTaxedGstRate,
   resolveSupplyType,
+  TaxedLineHsnSacError,
   validateGstin,
   validateStateCode,
 } from './utils/gst.util';
 import { roundMoney } from './utils/money.util';
+import { resolveInvoiceItemsFromCatalogue } from './utils/billing-catalogue-resolve.util';
+import { ReportProjectionBillingHookService } from '../reports/report-projection-billing-hook.service';
 
 type AuthenticatedUser = {
   sub: string;
@@ -71,6 +82,7 @@ export class BillingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly reportProjectionBillingHook: ReportProjectionBillingHookService,
   ) {}
 
   private async validateBranch(
@@ -108,6 +120,10 @@ export class BillingService {
       throw new NotFoundException('Patient not found');
     }
 
+    if (patient.branchId != null) {
+      assertBranchAccess(user, patient.branchId);
+    }
+
     return patient;
   }
 
@@ -133,6 +149,8 @@ export class BillingService {
     if (!invoice) {
       throw new NotFoundException('Invoice not found');
     }
+
+    assertBranchAccess(user, invoice.branchId);
 
     return invoice;
   }
@@ -282,21 +300,36 @@ export class BillingService {
     const patient = await this.findOwnedPatient(user, dto.patientId);
     this.assertPatientIsActive(patient);
 
-    if (dto.branchId) {
-      await this.validateBranch(user, dto.branchId);
+    const branchId = resolveCreateBranchId(user, dto.branchId);
+
+    if (branchId) {
+      await this.validateBranch(user, branchId);
     }
 
     const hospital = await this.findOwnedHospital(user.hospitalId);
+    const resolvedItems = await resolveInvoiceItemsFromCatalogue(
+      this.prisma,
+      user,
+      dto.items,
+    );
     const taxContext = this.resolveTaxContext(
       hospital,
-      dto.items,
+      resolvedItems,
       dto.placeOfSupplyStateCode,
     );
-    const computed = computeGstInvoice(
-      dto.items,
-      user.hospitalId,
-      taxContext.supplyType,
-    );
+    let computed;
+    try {
+      computed = computeGstInvoice(
+        resolvedItems,
+        user.hospitalId,
+        taxContext.supplyType,
+      );
+    } catch (error) {
+      if (error instanceof TaxedLineHsnSacError) {
+        throw new BadRequestException(error.message);
+      }
+      throw error;
+    }
 
     let invoice;
 
@@ -311,7 +344,7 @@ export class BillingService {
           return tx.invoice.create({
             data: {
               hospitalId: user.hospitalId,
-              branchId: dto.branchId,
+              branchId: branchId ?? null,
               patientId: dto.patientId,
               invoiceNumber,
               status: InvoiceStatus.DRAFT,
@@ -369,6 +402,9 @@ export class BillingService {
         invoiceNumber: invoice.invoiceNumber,
         patientId: invoice.patientId,
         itemCount: invoice.items.length,
+        catalogueLineCount: invoice.items.filter(
+          (line) => line.billingCatalogueItemId != null,
+        ).length,
         subtotalAmount: invoice.subtotalAmount.toString(),
         totalAmount: invoice.totalAmount.toString(),
         ...this.buildTaxAuditMetadata(invoice),
@@ -379,7 +415,7 @@ export class BillingService {
   }
 
   async findAll(user: AuthenticatedUser, query: InvoiceQueryDto = {}) {
-    if (query.branchId) {
+    if (user.branchId == null && query.branchId) {
       await this.validateBranch(user, query.branchId);
     }
 
@@ -390,12 +426,12 @@ export class BillingService {
     const page = query.page ?? DEFAULT_PAGE;
     const limit = query.limit ?? DEFAULT_LIMIT;
 
-    const where: Prisma.InvoiceWhereInput = {
+    const where = applyBranchScope(user, {
       hospitalId: user.hospitalId,
       ...(query.patientId !== undefined && { patientId: query.patientId }),
       ...(query.status !== undefined && { status: query.status }),
       ...(query.branchId !== undefined && { branchId: query.branchId }),
-    };
+    });
 
     const [total, data] = await this.prisma.$transaction([
       this.prisma.invoice.count({ where }),
@@ -434,6 +470,8 @@ export class BillingService {
       throw new NotFoundException('Invoice not found');
     }
 
+    assertBranchAccess(user, invoice.branchId);
+
     return invoice;
   }
 
@@ -445,15 +483,20 @@ export class BillingService {
     const existing = await this.findOwnedInvoice(user, invoiceId);
     this.assertDraftEditable(existing);
 
-    if (dto.branchId) {
-      await this.validateBranch(user, dto.branchId);
+    const nextBranchId = resolveUpdateBranchId(user, dto.branchId);
+    if (nextBranchId) {
+      await this.validateBranch(user, nextBranchId);
     }
 
     const hospital = await this.findOwnedHospital(user.hospitalId);
 
+    const resolvedDtoItems = dto.items
+      ? await resolveInvoiceItemsFromCatalogue(this.prisma, user, dto.items)
+      : null;
+
     const updatedInvoice = await this.prisma.$transaction(async (tx) => {
-      const nextItems: CreateInvoiceItemDto[] = dto.items
-        ? dto.items
+      const nextItems = resolvedDtoItems
+        ? resolvedDtoItems
         : (
             await tx.invoiceItem.findMany({
               where: { invoiceId },
@@ -466,6 +509,8 @@ export class BillingService {
             hsnSac: item.hsnSac ?? undefined,
             gstRate: item.gstRate.toNumber(),
             sortOrder: item.sortOrder,
+            billingCatalogueItemId: item.billingCatalogueItemId ?? undefined,
+            billingCatalogueCode: item.billingCatalogueCode ?? undefined,
           }));
 
       const nextPlaceOfSupply =
@@ -476,11 +521,19 @@ export class BillingService {
         nextItems,
         nextPlaceOfSupply,
       );
-      const computed = computeGstInvoice(
-        nextItems,
-        user.hospitalId,
-        taxContext.supplyType,
-      );
+      let computed;
+      try {
+        computed = computeGstInvoice(
+          nextItems,
+          user.hospitalId,
+          taxContext.supplyType,
+        );
+      } catch (error) {
+        if (error instanceof TaxedLineHsnSacError) {
+          throw new BadRequestException(error.message);
+        }
+        throw error;
+      }
 
       if (dto.items) {
         await tx.invoiceItem.deleteMany({
@@ -495,7 +548,7 @@ export class BillingService {
           id: invoiceId,
         },
         data: {
-          ...(dto.branchId !== undefined && { branchId: dto.branchId }),
+          ...(nextBranchId !== undefined && { branchId: nextBranchId }),
           ...(dto.notes !== undefined && { notes: dto.notes }),
           ...(dto.placeOfSupplyStateCode !== undefined && {
             placeOfSupplyStateCode: taxContext.placeOfSupplyStateCode,
@@ -600,6 +653,14 @@ export class BillingService {
       metadata: statusMetadata,
     });
 
+    if (dto.status === InvoiceStatus.ISSUED || dto.status === InvoiceStatus.PAID) {
+      await this.reportProjectionBillingHook.onBillingReportAffectingMutation({
+        hospitalId: user.hospitalId,
+        branchId: updatedInvoice.branchId,
+        referenceAt: updatedInvoice.issuedAt ?? now,
+      });
+    }
+
     return updatedInvoice;
   }
 
@@ -667,6 +728,68 @@ export class BillingService {
       netCollected: netCollected.toFixed(2),
       outstanding: outstanding.toFixed(2),
       mismatch: mismatch.toFixed(2),
+    };
+  }
+
+  async getConsultationFeeConfig(user: AuthenticatedUser) {
+    const hospital = await this.findOwnedHospital(user.hospitalId);
+    return {
+      unitPrice: hospital.consultationFeeUnitPrice?.toNumber() ?? null,
+      hsnSac: hospital.consultationFeeHsnSac,
+      gstRate: hospital.consultationFeeGstRate.toNumber(),
+    };
+  }
+
+  async updateConsultationFeeConfig(
+    user: AuthenticatedUser,
+    dto: {
+      unitPrice: number;
+      hsnSac?: string;
+      gstRate?: number;
+    },
+  ) {
+    const hospital = await this.findOwnedHospital(user.hospitalId);
+    const gstRate = dto.gstRate ?? hospital.consultationFeeGstRate.toNumber();
+
+    if (isTaxedGstRate(gstRate)) {
+      const hsn =
+        dto.hsnSac !== undefined
+          ? dto.hsnSac
+          : hospital.consultationFeeHsnSac;
+      if (!isValidHsnSacValue(hsn)) {
+        throw new BadRequestException(
+          'HSN/SAC is required and must be 4–8 alphanumeric characters when consultation GST rate is greater than zero',
+        );
+      }
+    }
+
+    const updated = await this.prisma.hospital.update({
+      where: { id: user.hospitalId },
+      data: {
+        consultationFeeUnitPrice: dto.unitPrice,
+        consultationFeeHsnSac: dto.hsnSac ?? null,
+        consultationFeeGstRate: gstRate,
+      },
+    });
+
+    await this.auditService.log({
+      action: 'HOSPITAL_CONSULTATION_FEE_UPDATED',
+      entity: 'Hospital',
+      entityId: updated.id,
+      hospitalId: user.hospitalId,
+      branchId: user.branchId ?? null,
+      userId: user.sub,
+      metadata: {
+        unitPrice: dto.unitPrice,
+        gstRate,
+        hasHsnSac: Boolean(dto.hsnSac),
+      },
+    });
+
+    return {
+      unitPrice: updated.consultationFeeUnitPrice?.toNumber() ?? null,
+      hsnSac: updated.consultationFeeHsnSac,
+      gstRate: updated.consultationFeeGstRate.toNumber(),
     };
   }
 }

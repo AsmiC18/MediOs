@@ -11,10 +11,21 @@ import {
   InsurancePreAuthorizationStatus,
   InvoiceStatus,
   PatientInsurancePolicyStatus,
+  PaymentPayerType,
+  PaymentProvider,
+  PaymentStatus,
   Prisma,
 } from '@prisma/client';
+import { InvoiceSplitPayerService } from '../billing/invoice-split-payer.service';
 import { AuditService } from '../audit/audit.service';
+import { JobService } from '../jobs/job.service';
+import { JOB_TYPES } from '../jobs/job-types.constants';
 import { roundMoney } from '../billing/utils/money.util';
+import {
+  applyBranchScope,
+  assertBranchAccess,
+  resolveCreateBranchId,
+} from '../common/auth/branch-scope.util';
 import { PrismaService } from '../common/prisma/prisma.service';
 import {
   ApproveClaimDto,
@@ -40,7 +51,9 @@ import {
   RejectPreAuthorizationDto,
 } from './dto/preauth.dto';
 import { CreateProviderDto, UpdateProviderDto } from './dto/provider.dto';
-import { parseMoney, resolveClaimAmounts } from './utils/amount.util';
+import { InsuranceRateResolverService } from './insurance-rate-resolver.service';
+import { parseMoney } from './utils/amount.util';
+import { calculateCopaySplit } from './utils/copay.util';
 import {
   isAllowedClaimTransition,
   isClaimCancellable,
@@ -49,6 +62,8 @@ import {
   isAllowedPreauthTransition,
   isPreauthCancellable,
 } from './utils/preauth-transitions.util';
+import { DomainEventOutboxService } from '../notifications/domain-event-outbox.service';
+import { buildInsuranceClaimSubmittedDomainEvent } from './insurance-claim-staff-event.util';
 
 type AuthenticatedUser = {
   sub: string;
@@ -63,6 +78,10 @@ export class InsuranceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly jobService: JobService,
+    private readonly rateResolver: InsuranceRateResolverService,
+    private readonly invoiceSplitPayerService: InvoiceSplitPayerService,
+    private readonly domainEventOutboxService: DomainEventOutboxService,
   ) {}
 
   private async validateBranch(user: AuthenticatedUser, branchId: string) {
@@ -82,6 +101,9 @@ export class InsuranceService {
     if (patient.mergedIntoPatientId) {
       throw new BadRequestException('Patient record is not active');
     }
+
+    assertBranchAccess(user, patient.branchId);
+
     return patient;
   }
 
@@ -92,17 +114,24 @@ export class InsuranceService {
     if (!provider || provider.hospitalId !== user.hospitalId) {
       throw new NotFoundException('Insurance provider not found');
     }
+
     return provider;
   }
 
   private async findOwnedPolicy(user: AuthenticatedUser, policyId: string) {
     const policy = await this.prisma.patientInsurancePolicy.findUnique({
       where: { id: policyId },
-      include: { provider: true },
+      include: {
+        provider: true,
+        patient: { select: { branchId: true } },
+      },
     });
     if (!policy || policy.hospitalId !== user.hospitalId) {
       throw new NotFoundException('Insurance policy not found');
     }
+
+    assertBranchAccess(user, policy.patient.branchId);
+
     return policy;
   }
 
@@ -113,6 +142,9 @@ export class InsuranceService {
     if (!preAuth || preAuth.hospitalId !== user.hospitalId) {
       throw new NotFoundException('Pre-authorization not found');
     }
+
+    assertBranchAccess(user, preAuth.branchId);
+
     return preAuth;
   }
 
@@ -129,6 +161,8 @@ export class InsuranceService {
     if (!claim || claim.hospitalId !== user.hospitalId) {
       throw new NotFoundException('Insurance claim not found');
     }
+
+    assertBranchAccess(user, claim.branchId);
     return claim;
   }
 
@@ -146,6 +180,7 @@ export class InsuranceService {
         : null,
       paidAmount: roundMoney(claim.paidAmount).toFixed(2),
       patientResponsibility: roundMoney(claim.patientResponsibility).toFixed(2),
+      payerResponsibility: roundMoney(claim.payerResponsibility).toFixed(2),
       ageInDays,
     };
   }
@@ -172,9 +207,23 @@ export class InsuranceService {
     return `CLM-${String(sequence).padStart(6, '0')}`;
   }
 
-  /** Future external TPA/insurer integration hook — no outbound calls today. */
   private async onClaimSubmitted(claimId: string): Promise<void> {
-    void claimId;
+    const claim = await this.prisma.insuranceClaim.findUnique({
+      where: { id: claimId },
+    });
+
+    if (!claim) {
+      return;
+    }
+
+    await this.jobService.enqueue({
+      hospitalId: claim.hospitalId,
+      branchId: claim.branchId,
+      type: JOB_TYPES.INSURANCE_CLAIM_SUBMIT,
+      idempotencyKey: `${JOB_TYPES.INSURANCE_CLAIM_SUBMIT}:${claimId}`,
+      payload: { claimId },
+      maxAttempts: 5,
+    });
   }
 
   // --- Providers ---
@@ -367,6 +416,10 @@ export class InsuranceService {
             : null,
           coverageEndDate: dto.coverageEndDate ? new Date(dto.coverageEndDate) : null,
           sumInsured: dto.sumInsured != null ? parseMoney(dto.sumInsured) : null,
+          copayType: dto.copayType,
+          copayValue:
+            dto.copayValue != null ? parseMoney(dto.copayValue) : null,
+          empanelmentId: dto.empanelmentId,
         },
         include: { provider: true },
       });
@@ -402,6 +455,10 @@ export class InsuranceService {
       where.providerId = query.providerId;
     }
     if (query.status) where.status = query.status;
+
+    if (user.branchId != null) {
+      where.patient = { branchId: user.branchId };
+    }
 
     return this.prisma.patientInsurancePolicy.findMany({
       where,
@@ -453,7 +510,11 @@ export class InsuranceService {
       throw new BadRequestException('Policy is not active');
     }
 
-    if (dto.branchId) await this.validateBranch(user, dto.branchId);
+    const branchId = resolveCreateBranchId(user, dto.branchId);
+
+    if (branchId) {
+      await this.validateBranch(user, branchId);
+    }
 
     if (dto.admissionId) {
       const admission = await this.prisma.ipdAdmission.findUnique({
@@ -482,7 +543,7 @@ export class InsuranceService {
     const preAuth = await this.prisma.insurancePreAuthorization.create({
       data: {
         hospitalId: user.hospitalId,
-        branchId: dto.branchId ?? null,
+        branchId: branchId ?? null,
         patientId: dto.patientId,
         policyId: dto.policyId,
         providerId: policy.providerId,
@@ -518,7 +579,7 @@ export class InsuranceService {
     if (query.status) where.status = query.status as InsurancePreAuthorizationStatus;
 
     return this.prisma.insurancePreAuthorization.findMany({
-      where,
+      where: applyBranchScope(user, where),
       orderBy: { requestDate: 'desc' },
     });
   }
@@ -712,7 +773,13 @@ export class InsuranceService {
       throw new BadRequestException('Cannot create claim for a cancelled invoice');
     }
 
-    if (dto.branchId) await this.validateBranch(user, dto.branchId);
+    assertBranchAccess(user, invoice.branchId);
+
+    const branchId = resolveCreateBranchId(user, dto.branchId ?? invoice.branchId);
+
+    if (branchId) {
+      await this.validateBranch(user, branchId);
+    }
 
     if (dto.preAuthorizationId) {
       const preAuth = await this.findOwnedPreAuth(user, dto.preAuthorizationId);
@@ -732,7 +799,7 @@ export class InsuranceService {
           return tx.insuranceClaim.create({
             data: {
               hospitalId: user.hospitalId,
-              branchId: dto.branchId ?? invoice.branchId,
+              branchId,
               patientId: dto.patientId,
               policyId: dto.policyId,
               providerId: policy.providerId,
@@ -793,7 +860,7 @@ export class InsuranceService {
     if (query.status) where.status = query.status;
 
     const claims = await this.prisma.insuranceClaim.findMany({
-      where,
+      where: applyBranchScope(user, where),
       include: {
         invoice: { select: { id: true, invoiceNumber: true, totalAmount: true, status: true } },
         policy: { select: { id: true, policyNumber: true, providerId: true } },
@@ -828,12 +895,33 @@ export class InsuranceService {
     const claim = await this.findOwnedClaim(user, id);
     this.assertClaimTransition(claim.status, InsuranceClaimStatus.SUBMITTED);
 
-    const updated = await this.prisma.insuranceClaim.update({
-      where: { id },
-      data: {
-        status: InsuranceClaimStatus.SUBMITTED,
-        submittedAt: new Date(),
-      },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const row = await tx.insuranceClaim.update({
+        where: { id },
+        data: {
+          status: InsuranceClaimStatus.SUBMITTED,
+          submittedAt: new Date(),
+        },
+      });
+
+      const event = buildInsuranceClaimSubmittedDomainEvent({
+        claimId: row.id,
+        claimNumber: row.claimNumber,
+        hospitalId: row.hospitalId,
+        branchId: row.branchId,
+        patientId: row.patientId,
+      });
+      const outbox = await this.domainEventOutboxService.createInTransaction(
+        tx,
+        event,
+      );
+      await this.domainEventOutboxService.enqueueDispatchInTransaction(tx, {
+        hospitalId: row.hospitalId,
+        branchId: row.branchId,
+        outboxId: outbox.id,
+      });
+
+      return row;
     });
 
     await this.onClaimSubmitted(updated.id);
@@ -875,29 +963,51 @@ export class InsuranceService {
 
   async approveClaim(user: AuthenticatedUser, id: string, dto: ApproveClaimDto) {
     const claim = await this.findOwnedClaim(user, id);
-    const { approvedAmount, patientResponsibility } = resolveClaimAmounts({
-      claimedAmount: claim.claimedAmount,
+    const policy = await this.prisma.patientInsurancePolicy.findUnique({
+      where: { id: claim.policyId },
+    });
+
+    if (!policy) {
+      throw new NotFoundException('Policy not found');
+    }
+
+    const split = calculateCopaySplit({
       approvedAmount: parseMoney(dto.approvedAmount),
-      patientResponsibility:
+      policy: {
+        copayType: policy.copayType,
+        copayValue: policy.copayValue,
+      },
+      overridePatientResponsibility:
         dto.patientResponsibility != null
           ? parseMoney(dto.patientResponsibility)
           : undefined,
     });
 
-    const nextStatus = approvedAmount.lessThan(claim.claimedAmount)
+    const nextStatus = split.approvedAmount.lessThan(claim.claimedAmount)
       ? InsuranceClaimStatus.PARTIALLY_APPROVED
       : InsuranceClaimStatus.APPROVED;
 
     this.assertClaimTransition(claim.status, nextStatus);
 
-    await this.prisma.insuranceClaim.update({
-      where: { id },
-      data: {
-        status: nextStatus,
-        approvedAmount,
-        patientResponsibility,
-        approvedAt: new Date(),
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.insuranceClaim.update({
+        where: { id },
+        data: {
+          status: nextStatus,
+          approvedAmount: split.approvedAmount,
+          patientResponsibility: split.patientResponsibility,
+          payerResponsibility: split.payerResponsibility,
+          approvedAt: new Date(),
+        },
+      });
+
+      await tx.invoice.update({
+        where: { id: claim.invoiceId },
+        data: {
+          insurancePatientResponsibilityAmount: split.patientResponsibility,
+          insurancePayerResponsibilityAmount: split.payerResponsibility,
+        },
+      });
     });
 
     await this.auditService.log({
@@ -909,8 +1019,9 @@ export class InsuranceService {
       userId: user.sub,
       metadata: {
         status: nextStatus,
-        approvedAmount: approvedAmount.toString(),
-        patientResponsibility: patientResponsibility.toString(),
+        approvedAmount: split.approvedAmount.toString(),
+        patientResponsibility: split.patientResponsibility.toString(),
+        payerResponsibility: split.payerResponsibility.toString(),
       },
     });
 
@@ -957,28 +1068,126 @@ export class InsuranceService {
       throw new BadRequestException('Claim has no approved amount');
     }
 
-    const payment = parseMoney(dto.paidAmount);
-    const newPaidTotal = roundMoney(claim.paidAmount.plus(payment));
-
-    if (newPaidTotal.greaterThan(claim.approvedAmount)) {
-      throw new BadRequestException('Payment exceeds approved insurer amount');
+    const settlementAmount = parseMoney(dto.paidAmount);
+    if (settlementAmount.lessThanOrEqualTo(0)) {
+      throw new BadRequestException('Settlement amount must be positive');
     }
 
-    const nextStatus =
-      newPaidTotal.equals(claim.approvedAmount)
+    const idempotencyKey = dto.idempotencyKey?.trim()
+      ? `insurance.claim.settlement:${id}:${dto.idempotencyKey.trim()}`
+      : undefined;
+
+    if (idempotencyKey) {
+      const existingPayment = await this.prisma.payment.findFirst({
+        where: { hospitalId: user.hospitalId, idempotencyKey },
+      });
+      if (existingPayment) {
+        return this.formatClaim(await this.findOwnedClaim(user, id));
+      }
+    }
+
+    const invoiceSnapshot = await this.prisma.invoice.findFirst({
+      where: { id: claim.invoiceId, hospitalId: user.hospitalId },
+    });
+    if (!invoiceSnapshot) {
+      throw new NotFoundException('Invoice not found for claim');
+    }
+
+    if (
+      invoiceSnapshot.insurancePayerResponsibilityAmount == null ||
+      invoiceSnapshot.insurancePayerResponsibilityAmount.lessThanOrEqualTo(0)
+    ) {
+      throw new BadRequestException('Invoice has no insurer responsibility');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const invoice = await this.invoiceSplitPayerService.lockInvoiceForUpdate(
+        tx,
+        claim.invoiceId,
+        user.hospitalId,
+      );
+
+      const balances = await this.invoiceSplitPayerService.computeBalancesForInvoice(
+        invoice,
+        tx,
+      );
+
+      if (settlementAmount.greaterThan(balances.insurerOutstanding)) {
+        throw new BadRequestException(
+          'Settlement exceeds remaining insurer responsibility on invoice',
+        );
+      }
+
+      const lockedClaim = await tx.insuranceClaim.findFirstOrThrow({
+        where: { id, hospitalId: user.hospitalId },
+      });
+
+      const newClaimPaidTotal = roundMoney(lockedClaim.paidAmount.plus(settlementAmount));
+      if (newClaimPaidTotal.greaterThan(lockedClaim.payerResponsibility)) {
+        throw new BadRequestException('Payment exceeds insurer responsibility on claim');
+      }
+
+      const nextStatus = newClaimPaidTotal.equals(lockedClaim.payerResponsibility)
         ? InsuranceClaimStatus.PAID
-        : claim.status;
+        : lockedClaim.status;
 
-    if (nextStatus === InsuranceClaimStatus.PAID) {
-      this.assertClaimTransition(claim.status, InsuranceClaimStatus.PAID);
-    }
+      if (nextStatus === InsuranceClaimStatus.PAID) {
+        this.assertClaimTransition(lockedClaim.status, InsuranceClaimStatus.PAID);
+      }
 
-    await this.prisma.insuranceClaim.update({
-      where: { id },
-      data: {
-        paidAmount: newPaidTotal,
-        status: nextStatus,
-        paidAt: nextStatus === InsuranceClaimStatus.PAID ? new Date() : claim.paidAt,
+      try {
+        await tx.payment.create({
+          data: {
+            hospitalId: user.hospitalId,
+            branchId: invoice.branchId,
+            invoiceId: invoice.id,
+            insuranceClaimId: lockedClaim.id,
+            amount: settlementAmount,
+            currency: invoice.currency,
+            provider: PaymentProvider.MANUAL,
+            payerType: PaymentPayerType.INSURER,
+            status: PaymentStatus.SUCCEEDED,
+            paidAt: new Date(),
+            idempotencyKey: idempotencyKey ?? null,
+          },
+        });
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2002' &&
+          idempotencyKey
+        ) {
+          return;
+        }
+        throw error;
+      }
+
+      await tx.insuranceClaim.update({
+        where: { id: lockedClaim.id },
+        data: {
+          paidAmount: newClaimPaidTotal,
+          status: nextStatus,
+          paidAt: nextStatus === InsuranceClaimStatus.PAID ? new Date() : lockedClaim.paidAt,
+        },
+      });
+
+      await this.invoiceSplitPayerService.syncInvoiceSettlementStatus(tx, invoice, {
+        source: 'insurance_claim_settlement',
+        claimId: lockedClaim.id,
+        settlementAmount: settlementAmount.toFixed(2),
+      });
+    });
+
+    await this.auditService.log({
+      action: 'INSURER_PAYMENT_RECORDED',
+      entity: 'InsuranceClaim',
+      entityId: id,
+      hospitalId: user.hospitalId,
+      branchId: claim.branchId,
+      userId: user.sub,
+      metadata: {
+        paidAmount: settlementAmount.toFixed(2),
+        invoiceId: claim.invoiceId,
       },
     });
 
@@ -990,9 +1199,8 @@ export class InsuranceService {
       branchId: claim.branchId,
       userId: user.sub,
       metadata: {
-        paidAmount: payment.toString(),
-        totalPaid: newPaidTotal.toString(),
-        status: nextStatus,
+        paidAmount: settlementAmount.toString(),
+        invoiceId: claim.invoiceId,
       },
     });
 

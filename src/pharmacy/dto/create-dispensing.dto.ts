@@ -4,6 +4,7 @@ import {
   IsArray,
   IsInt,
   IsOptional,
+  IsString,
   IsUUID,
   Min,
   ValidateNested,
@@ -15,6 +16,14 @@ export class DispensingItemDto {
 
   @IsUUID()
   productId: string;
+
+  @IsUUID()
+  @IsOptional()
+  prescribedProductId?: string;
+
+  @IsString()
+  @IsOptional()
+  substitutionReason?: string;
 
   @IsUUID()
   @IsOptional()

@@ -8,24 +8,36 @@ import {
 import {
   InvoiceStatus,
   Payment,
+  PaymentPayerType,
   PaymentProvider,
   PaymentStatus,
   Prisma,
 } from '@prisma/client';
+import { InvoiceSplitPayerService } from './invoice-split-payer.service';
 import { AuditService } from '../audit/audit.service';
+import { assertBranchAccess } from '../common/auth/branch-scope.util';
 import { PrismaService } from '../common/prisma/prisma.service';
 import {
   RazorpayRefundWebhookPayload,
   RefundsService,
 } from './refunds.service';
+import { resolvePrivacyAuditUserId } from '../privacy/patient-privacy-access.util';
+import { PAYMENT_RECONCILIATION_RESOLVABLE_STATUSES } from './payment-reconciliation.types';
+import { RazorpayError } from './razorpay.errors';
 import { RazorpayService } from './razorpay.service';
 import { roundMoney, toDecimal } from './utils/money.util';
 import { verifyRazorpayWebhookSignature } from './utils/webhook-signature.util';
+import {
+  reconcileCheckoutIntentOnPaymentFailure,
+  reconcileCheckoutIntentOnPaymentSuccess,
+  reconcileCheckoutIntentOnPaymentUncertain,
+} from './payment-checkout-intent-reconciliation.util';
 
 type AuthenticatedUser = {
   sub: string;
   hospitalId: string;
   branchId?: string | null;
+  auditUserId?: string | null;
 };
 
 type RazorpayWebhookPayload = RazorpayRefundWebhookPayload & {
@@ -62,6 +74,7 @@ export class PaymentsService {
     private readonly auditService: AuditService,
     private readonly razorpayService: RazorpayService,
     private readonly refundsService: RefundsService,
+    private readonly invoiceSplitPayerService: InvoiceSplitPayerService,
   ) {}
 
   private async findOwnedInvoice(
@@ -78,6 +91,8 @@ export class PaymentsService {
     if (!invoice) {
       throw new NotFoundException('Invoice not found');
     }
+
+    assertBranchAccess(user, invoice.branchId);
 
     return invoice;
   }
@@ -96,6 +111,8 @@ export class PaymentsService {
     if (!payment) {
       throw new NotFoundException('Payment not found');
     }
+
+    assertBranchAccess(user, payment.branchId);
 
     return payment;
   }
@@ -157,6 +174,7 @@ export class PaymentsService {
     paymentId?: string;
     providerPaymentLinkId?: string;
     providerPaymentId?: string;
+    providerOrderId?: string;
   } {
     const paymentLinkEntity = payload.payload?.payment_link?.entity;
     const paymentEntity = payload.payload?.payment?.entity;
@@ -165,6 +183,7 @@ export class PaymentsService {
       paymentId: paymentLinkEntity?.reference_id,
       providerPaymentLinkId: paymentLinkEntity?.id,
       providerPaymentId: paymentEntity?.id,
+      providerOrderId: paymentEntity?.order_id,
     };
   }
 
@@ -191,36 +210,66 @@ export class PaymentsService {
   }
 
   async initiatePayment(user: AuthenticatedUser, invoiceId: string) {
-    const invoice = await this.findOwnedInvoice(user, invoiceId);
-    this.assertInvoicePayable(invoice.status);
+    const { invoice, payment, amount } = await this.prisma.$transaction(
+      async (tx) => {
+        const lockedInvoice =
+          await this.invoiceSplitPayerService.lockInvoiceForUpdate(
+            tx,
+            invoiceId,
+            user.hospitalId,
+          );
+        assertBranchAccess(user, lockedInvoice.branchId);
+        this.assertInvoicePayable(lockedInvoice.status);
 
-    const pendingPayment = await this.prisma.payment.findFirst({
-      where: {
-        invoiceId,
-        hospitalId: user.hospitalId,
-        status: PaymentStatus.PENDING,
+        const inFlightPayment = await tx.payment.findFirst({
+          where: {
+            invoiceId,
+            hospitalId: user.hospitalId,
+            payerType: PaymentPayerType.PATIENT,
+            status: { in: PAYMENT_RECONCILIATION_RESOLVABLE_STATUSES },
+          },
+        });
+
+        if (inFlightPayment) {
+          throw new ConflictException(
+            'A payment is already in progress for this invoice',
+          );
+        }
+
+        const balances =
+          await this.invoiceSplitPayerService.computeBalancesForInvoice(
+            lockedInvoice,
+            tx,
+          );
+
+        if (balances.patientOutstanding.lessThanOrEqualTo(0)) {
+          throw new ConflictException(
+            'No patient balance remaining on this invoice',
+          );
+        }
+
+        const patientAmount = balances.patientOutstanding;
+
+        const createdPayment = await tx.payment.create({
+          data: {
+            hospitalId: user.hospitalId,
+            branchId: lockedInvoice.branchId,
+            invoiceId: lockedInvoice.id,
+            amount: patientAmount,
+            currency: lockedInvoice.currency,
+            provider: PaymentProvider.RAZORPAY,
+            payerType: PaymentPayerType.PATIENT,
+            status: PaymentStatus.INITIATED,
+          },
+        });
+
+        return {
+          invoice: lockedInvoice,
+          payment: createdPayment,
+          amount: patientAmount,
+        };
       },
-    });
-
-    if (pendingPayment) {
-      throw new ConflictException(
-        'A pending payment already exists for this invoice',
-      );
-    }
-
-    const amount = roundMoney(invoice.totalAmount);
-
-    const payment = await this.prisma.payment.create({
-      data: {
-        hospitalId: user.hospitalId,
-        branchId: invoice.branchId,
-        invoiceId: invoice.id,
-        amount,
-        currency: invoice.currency,
-        provider: PaymentProvider.RAZORPAY,
-        status: PaymentStatus.INITIATED,
-      },
-    });
+    );
 
     try {
       const link = await this.razorpayService.createPaymentLink({
@@ -246,7 +295,7 @@ export class PaymentsService {
         entityId: updatedPayment.id,
         hospitalId: user.hospitalId,
         branchId: updatedPayment.branchId,
-        userId: user.sub,
+        userId: resolvePrivacyAuditUserId(user),
         metadata: {
           invoiceId: invoice.id,
           amount: this.formatAmount(updatedPayment.amount),
@@ -263,6 +312,38 @@ export class PaymentsService {
         providerPaymentLinkId: updatedPayment.providerPaymentLinkId,
       };
     } catch (error) {
+      if (error instanceof RazorpayError && error.kind === 'ambiguous') {
+        const uncertainPayment = await this.prisma.payment.update({
+          where: { id: payment.id },
+          data: {
+            status: PaymentStatus.SUBMIT_UNCERTAIN,
+            failureReason: this.sanitizeFailureReason(error.message),
+          },
+        });
+
+        await this.auditService.log({
+          action: 'PAYMENT_SUBMIT_UNCERTAIN',
+          entity: 'Payment',
+          entityId: uncertainPayment.id,
+          hospitalId: user.hospitalId,
+          branchId: uncertainPayment.branchId,
+          userId: resolvePrivacyAuditUserId(user),
+          metadata: {
+            invoiceId: invoice.id,
+            amount: this.formatAmount(uncertainPayment.amount),
+          },
+        });
+
+        return {
+          paymentId: uncertainPayment.id,
+          status: uncertainPayment.status,
+          amount: this.formatAmount(uncertainPayment.amount),
+          currency: uncertainPayment.currency,
+          paymentLinkUrl: null,
+          providerPaymentLinkId: uncertainPayment.providerPaymentLinkId,
+        };
+      }
+
       await this.prisma.payment.update({
         where: {
           id: payment.id,
@@ -420,6 +501,13 @@ export class PaymentsService {
 
     if (duplicateResult.outcome === 'amount_mismatch') {
       await this.auditAmountMismatch(payment, providerEventId, eventType);
+      await this.prisma.$transaction(async (tx) => {
+        await reconcileCheckoutIntentOnPaymentUncertain(
+          tx,
+          payment,
+          'webhook_amount_mismatch',
+        );
+      });
     }
 
     return {
@@ -433,6 +521,7 @@ export class PaymentsService {
     paymentId?: string;
     providerPaymentLinkId?: string;
     providerPaymentId?: string;
+    providerOrderId?: string;
   }): Promise<Payment | null> {
     if (lookup.paymentId) {
       const byReference = await this.prisma.payment.findUnique({
@@ -460,10 +549,22 @@ export class PaymentsService {
     }
 
     if (lookup.providerPaymentId) {
-      return this.prisma.payment.findFirst({
+      const byProviderPayment = await this.prisma.payment.findFirst({
         where: {
           provider: PaymentProvider.RAZORPAY,
           providerPaymentId: lookup.providerPaymentId,
+        },
+      });
+      if (byProviderPayment) {
+        return byProviderPayment;
+      }
+    }
+
+    if (lookup.providerOrderId) {
+      return this.prisma.payment.findFirst({
+        where: {
+          provider: PaymentProvider.RAZORPAY,
+          providerOrderId: lookup.providerOrderId,
         },
       });
     }
@@ -479,6 +580,7 @@ export class PaymentsService {
     eventType: string,
   ): Promise<'success' | 'amount_mismatch' | 'ignored'> {
     if (payment.status === PaymentStatus.SUCCEEDED) {
+      await reconcileCheckoutIntentOnPaymentSuccess(tx, payment);
       return 'ignored';
     }
 
@@ -507,16 +609,25 @@ export class PaymentsService {
         invoice.currency,
       )
     ) {
+      await reconcileCheckoutIntentOnPaymentUncertain(
+        tx,
+        payment,
+        'webhook_amount_mismatch',
+      );
       return 'amount_mismatch';
     }
 
-    if (payment.status !== PaymentStatus.PENDING) {
+    if (
+      !PAYMENT_RECONCILIATION_RESOLVABLE_STATUSES.includes(payment.status)
+    ) {
       return 'ignored';
     }
 
     const now = new Date();
     const providerPaymentId = paymentEntity?.id ?? payment.providerPaymentId;
     const providerOrderId = paymentEntity?.order_id ?? payment.providerOrderId;
+    const providerPaymentLinkId =
+      paymentLinkEntity?.id ?? payment.providerPaymentLinkId;
 
     try {
       await tx.payment.update({
@@ -526,6 +637,7 @@ export class PaymentsService {
         data: {
           status: PaymentStatus.SUCCEEDED,
           providerPaymentId,
+          providerPaymentLinkId,
           providerOrderId,
           paidAt: now,
           failureReason: null,
@@ -542,30 +654,41 @@ export class PaymentsService {
       throw error;
     }
 
-    if (invoice.status === InvoiceStatus.ISSUED) {
-      await tx.invoice.update({
-        where: {
-          id: invoice.id,
-        },
-        data: {
-          status: InvoiceStatus.PAID,
-          paidAt: now,
-        },
-      });
+    await this.invoiceSplitPayerService.syncInvoiceSettlementStatus(tx, invoice, {
+      source: 'razorpay',
+      paymentId: payment.id,
+    });
 
+    const checkoutOutcome = await reconcileCheckoutIntentOnPaymentSuccess(tx, payment);
+    if (checkoutOutcome === 'updated' || checkoutOutcome === 'already_terminal') {
       await this.auditService.log({
-        action: 'INVOICE_STATUS_CHANGED',
-        entity: 'Invoice',
-        entityId: invoice.id,
+        action: 'PAYMENT_CHECKOUT_INTENT_RECONCILED',
+        entity: 'PaymentCheckoutIntent',
+        entityId: payment.id,
         hospitalId: payment.hospitalId,
-        branchId: invoice.branchId,
+        branchId: payment.branchId,
         metadata: {
-          from: InvoiceStatus.ISSUED,
-          to: InvoiceStatus.PAID,
-          source: 'razorpay',
+          paymentId: payment.id,
+          invoiceId: payment.invoiceId,
+          outcome: checkoutOutcome,
+          targetStatus: 'PAID',
         },
       });
     }
+
+    await this.auditService.log({
+      action: 'PATIENT_PAYMENT_RECORDED',
+      entity: 'Payment',
+      entityId: payment.id,
+      hospitalId: payment.hospitalId,
+      branchId: payment.branchId,
+      userId: null,
+      metadata: {
+        invoiceId: payment.invoiceId,
+        amount: this.formatAmount(payment.amount),
+        payerType: PaymentPayerType.PATIENT,
+      },
+    });
 
     await this.auditService.log({
       action: 'PAYMENT_SUCCEEDED',
@@ -649,6 +772,12 @@ export class PaymentsService {
         providerOrderId: paymentEntity?.order_id ?? payment.providerOrderId,
       },
     });
+
+    await reconcileCheckoutIntentOnPaymentFailure(
+      tx,
+      payment,
+      failureReason ?? 'Payment failed',
+    );
 
     await this.auditService.log({
       action: 'PAYMENT_FAILED',

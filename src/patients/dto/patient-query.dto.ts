@@ -1,5 +1,5 @@
-import { Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsEnum,
   IsInt,
   IsOptional,
@@ -8,7 +8,8 @@ import {
   Max,
   Min,
 } from 'class-validator';
-import { Gender } from '@prisma/client';
+import { Gender, PatientAtRiskStatus } from '@prisma/client';
+import { Transform, Type } from 'class-transformer';
 
 export class PatientQueryDto {
   @IsString()
@@ -34,6 +35,23 @@ export class PatientQueryDto {
   @IsUUID()
   @IsOptional()
   branchId?: string;
+
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true) {
+      return true;
+    }
+    if (value === 'false' || value === false) {
+      return false;
+    }
+    return value;
+  })
+  @IsBoolean()
+  @IsOptional()
+  isAtRisk?: boolean;
+
+  @IsEnum(PatientAtRiskStatus)
+  @IsOptional()
+  atRiskStatus?: PatientAtRiskStatus;
 
   @IsString()
   @IsOptional()

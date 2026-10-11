@@ -8,9 +8,14 @@ import {
  * Callback JWT validation details are only partially documented.
  * Validation is isolated here so it can be extended when Swagger is confirmed.
  */
+export type ValidatedLinkTokenCallback = ParsedLinkTokenCallback & {
+  requestId: string;
+  linkToken: string;
+};
+
 @Injectable()
 export class AbdmCallbackValidationService {
-  validateGenerateTokenCallback(body: unknown): ParsedLinkTokenCallback {
+  validateGenerateTokenCallback(body: unknown): ValidatedLinkTokenCallback {
     const parsed = parseLinkTokenCallbackBody(body);
 
     if (!parsed.requestId) {
@@ -21,6 +26,6 @@ export class AbdmCallbackValidationService {
       throw new BadRequestException('Callback missing linkToken');
     }
 
-    return parsed;
+    return parsed as ValidatedLinkTokenCallback;
   }
 }

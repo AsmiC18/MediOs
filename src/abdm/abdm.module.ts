@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit/audit.module';
 import { CommonModule } from '../common/common.module';
 import { AbdmBridgeService } from './abdm-bridge.service';
+import { AbdmCallbackAuthenticationService } from './abdm-callback-authentication.service';
 import { AbdmCallbackController } from './abdm-callback.controller';
 import { AbdmCallbackValidationService } from './abdm-callback-validation.service';
 import { AbdmCallbackService } from './abdm-callback.service';
@@ -47,6 +48,7 @@ import { PatientAbhaService } from './patient-abha.service';
     AbdmCertificateService,
     AbdmBridgeService,
     AbdmLinkTokenService,
+    AbdmCallbackAuthenticationService,
     AbdmCallbackValidationService,
     AbdmCallbackService,
     AbdmHfrSearchService,

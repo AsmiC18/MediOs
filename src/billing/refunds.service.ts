@@ -1,5 +1,7 @@
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -12,9 +14,17 @@ import {
   RefundStatus,
 } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
+import { assertBranchAccess } from '../common/auth/branch-scope.util';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateRefundDto } from './dto/create-refund.dto';
+import {
+  REFUND_BALANCE_RESERVATION_STATUSES,
+  REFUND_RECONCILIATION_RESOLVABLE_STATUSES,
+} from './refund-reconciliation.types';
+import { RejectRefundDto } from './dto/reject-refund.dto';
+import { RazorpayError } from './razorpay.errors';
 import { RazorpayService } from './razorpay.service';
+import { InvoiceSplitPayerService } from './invoice-split-payer.service';
 import { roundMoney, toDecimal } from './utils/money.util';
 
 type AuthenticatedUser = {
@@ -54,6 +64,7 @@ export class RefundsService {
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
     private readonly razorpayService: RazorpayService,
+    private readonly invoiceSplitPayerService: InvoiceSplitPayerService,
   ) {}
 
   private formatAmount(amount: Prisma.Decimal): string {
@@ -102,6 +113,8 @@ export class RefundsService {
       throw new NotFoundException('Payment not found');
     }
 
+    assertBranchAccess(user, payment.branchId);
+
     return payment;
   }
 
@@ -119,6 +132,8 @@ export class RefundsService {
     if (!refund) {
       throw new NotFoundException('Refund not found');
     }
+
+    assertBranchAccess(user, refund.branchId);
 
     return refund;
   }
@@ -143,8 +158,12 @@ export class RefundsService {
     }
   }
 
-  async calculateRemainingRefundable(paymentId: string): Promise<Prisma.Decimal> {
-    const payment = await this.prisma.payment.findUnique({
+  private async calculateRemainingRefundableForClient(
+    db: PrismaService | Prisma.TransactionClient,
+    paymentId: string,
+    excludeRefundId?: string,
+  ): Promise<Prisma.Decimal> {
+    const payment = await db.payment.findUnique({
       where: { id: paymentId },
     });
 
@@ -152,8 +171,8 @@ export class RefundsService {
       throw new NotFoundException('Payment not found');
     }
 
-    const [succeededAgg, inFlightAgg] = await Promise.all([
-      this.prisma.refund.aggregate({
+    const [succeededAgg, reservedAgg] = await Promise.all([
+      db.refund.aggregate({
         where: {
           paymentId,
           status: RefundStatus.SUCCEEDED,
@@ -162,12 +181,13 @@ export class RefundsService {
           amount: true,
         },
       }),
-      this.prisma.refund.aggregate({
+      db.refund.aggregate({
         where: {
           paymentId,
           status: {
-            in: [RefundStatus.REQUESTED, RefundStatus.PROCESSING],
+            in: REFUND_BALANCE_RESERVATION_STATUSES,
           },
+          ...(excludeRefundId ? { id: { not: excludeRefundId } } : {}),
         },
         _sum: {
           amount: true,
@@ -178,13 +198,34 @@ export class RefundsService {
     const succeededTotal = roundMoney(
       succeededAgg._sum.amount ?? new Prisma.Decimal(0),
     );
-    const inFlightTotal = roundMoney(
-      inFlightAgg._sum.amount ?? new Prisma.Decimal(0),
+    const reservedTotal = roundMoney(
+      reservedAgg._sum.amount ?? new Prisma.Decimal(0),
     );
 
     return roundMoney(
-      roundMoney(payment.amount).sub(succeededTotal).sub(inFlightTotal),
+      roundMoney(payment.amount).sub(succeededTotal).sub(reservedTotal),
     );
+  }
+
+  async calculateRemainingRefundable(paymentId: string): Promise<Prisma.Decimal> {
+    return this.calculateRemainingRefundableForClient(this.prisma, paymentId);
+  }
+
+  private async lockPaymentForUpdate(
+    tx: Prisma.TransactionClient,
+    paymentId: string,
+    hospitalId: string,
+  ): Promise<Payment> {
+    const rows = await tx.$queryRaw<Payment[]>`
+      SELECT * FROM "Payment"
+      WHERE "id" = ${paymentId} AND "hospitalId" = ${hospitalId}
+      FOR UPDATE
+    `;
+    const payment = rows[0];
+    if (!payment) {
+      throw new NotFoundException('Payment not found');
+    }
+    return payment;
   }
 
   async createRefund(
@@ -215,34 +256,227 @@ export class RefundsService {
     const payment = await this.findOwnedPayment(user, paymentId);
     this.assertPaymentRefundable(payment);
 
+    const reason = this.sanitizeReason(dto.reason.trim());
+    if (!reason) {
+      throw new BadRequestException('Refund reason is required');
+    }
+
     const requestedAmount = roundMoney(toDecimal(dto.amount));
 
     if (requestedAmount.lte(0)) {
       throw new BadRequestException('Refund amount must be greater than zero');
     }
 
-    const remainingRefundable = await this.calculateRemainingRefundable(
-      payment.id,
-    );
+    const refund = await this.prisma.$transaction(async (tx) => {
+      const lockedPayment = await this.lockPaymentForUpdate(
+        tx,
+        payment.id,
+        user.hospitalId,
+      );
+      this.assertPaymentRefundable(lockedPayment);
 
-    if (requestedAmount.gt(remainingRefundable)) {
+      const remainingRefundable =
+        await this.calculateRemainingRefundableForClient(tx, lockedPayment.id);
+
+      if (requestedAmount.gt(remainingRefundable)) {
+        throw new BadRequestException(
+          'Refund amount exceeds remaining refundable amount',
+        );
+      }
+
+      return tx.refund.create({
+        data: {
+          hospitalId: user.hospitalId,
+          branchId: lockedPayment.branchId,
+          paymentId: lockedPayment.id,
+          amount: requestedAmount,
+          currency: lockedPayment.currency,
+          provider: PaymentProvider.RAZORPAY,
+          status: RefundStatus.REQUESTED,
+          providerPaymentId: lockedPayment.providerPaymentId,
+          clientRequestId,
+          reason,
+          requestedByUserId: user.sub,
+        },
+      });
+    });
+
+    await this.auditService.log({
+      action: 'REFUND_REQUESTED',
+      entity: 'Refund',
+      entityId: refund.id,
+      hospitalId: user.hospitalId,
+      branchId: refund.branchId,
+      userId: user.sub,
+      metadata: {
+        paymentId: payment.id,
+        invoiceId: payment.invoiceId,
+        amount: this.formatAmount(refund.amount),
+        requestedByUserId: user.sub,
+      },
+    });
+
+    return this.formatRefundResponse(refund);
+  }
+
+  async approveRefund(user: AuthenticatedUser, refundId: string) {
+    const refund = await this.findOwnedRefund(user, refundId);
+
+    if (refund.status !== RefundStatus.REQUESTED) {
       throw new BadRequestException(
-        'Refund amount exceeds remaining refundable amount',
+        'Only requested refunds can be approved',
       );
     }
 
-    const refund = await this.prisma.refund.create({
-      data: {
-        hospitalId: user.hospitalId,
-        branchId: payment.branchId,
+    if (
+      refund.requestedByUserId &&
+      refund.requestedByUserId === user.sub
+    ) {
+      throw new ForbiddenException(
+        'Refund requester cannot approve their own refund',
+      );
+    }
+
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: refund.paymentId },
+    });
+    if (!payment) {
+      throw new NotFoundException('Payment not found');
+    }
+    this.assertPaymentRefundable(payment);
+
+    const now = new Date();
+    const approved = await this.prisma.$transaction(async (tx) => {
+      await this.lockPaymentForUpdate(tx, payment.id, user.hospitalId);
+
+      const current = await tx.refund.findFirst({
+        where: { id: refundId, hospitalId: user.hospitalId },
+      });
+      if (!current || current.status !== RefundStatus.REQUESTED) {
+        throw new BadRequestException(
+          'Only requested refunds can be approved',
+        );
+      }
+
+      const remaining = await this.calculateRemainingRefundableForClient(
+        tx,
+        payment.id,
+        refundId,
+      );
+      if (roundMoney(current.amount).gt(remaining)) {
+        throw new BadRequestException(
+          'Refund amount exceeds remaining refundable amount',
+        );
+      }
+
+      return tx.refund.update({
+        where: { id: refundId },
+        data: {
+          status: RefundStatus.APPROVED,
+          approvedByUserId: user.sub,
+          approvedAt: now,
+        },
+      });
+    });
+
+    await this.auditService.log({
+      action: 'REFUND_APPROVED',
+      entity: 'Refund',
+      entityId: approved.id,
+      hospitalId: user.hospitalId,
+      branchId: approved.branchId,
+      userId: user.sub,
+      metadata: {
         paymentId: payment.id,
-        amount: requestedAmount,
-        currency: payment.currency,
-        provider: PaymentProvider.RAZORPAY,
-        status: RefundStatus.REQUESTED,
-        providerPaymentId: payment.providerPaymentId,
-        clientRequestId,
-        reason: this.sanitizeReason(dto.reason),
+        invoiceId: payment.invoiceId,
+        amount: this.formatAmount(approved.amount),
+        requestedByUserId: approved.requestedByUserId,
+        approvedByUserId: user.sub,
+      },
+    });
+
+    return this.executeApprovedRefund(user, approved.id);
+  }
+
+  async rejectRefund(
+    user: AuthenticatedUser,
+    refundId: string,
+    dto: RejectRefundDto,
+  ) {
+    const rejectionReason = this.sanitizeReason(dto.rejectionReason);
+    if (!rejectionReason) {
+      throw new BadRequestException('Rejection reason is required');
+    }
+
+    const refund = await this.findOwnedRefund(user, refundId);
+
+    if (refund.status !== RefundStatus.REQUESTED) {
+      throw new BadRequestException('Only requested refunds can be rejected');
+    }
+
+    const now = new Date();
+    const rejected = await this.prisma.refund.update({
+      where: { id: refundId },
+      data: {
+        status: RefundStatus.REJECTED,
+        rejectedByUserId: user.sub,
+        rejectedAt: now,
+        rejectionReason,
+      },
+    });
+
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: rejected.paymentId },
+    });
+
+    await this.auditService.log({
+      action: 'REFUND_REJECTED',
+      entity: 'Refund',
+      entityId: rejected.id,
+      hospitalId: user.hospitalId,
+      branchId: rejected.branchId,
+      userId: user.sub,
+      metadata: {
+        paymentId: rejected.paymentId,
+        invoiceId: payment?.invoiceId,
+        amount: this.formatAmount(rejected.amount),
+        rejectedByUserId: user.sub,
+        rejectionReason,
+      },
+    });
+
+    return this.formatRefundResponse(rejected);
+  }
+
+  async executeApprovedRefund(user: AuthenticatedUser, refundId: string) {
+    const refund = await this.findOwnedRefund(user, refundId);
+
+    if (refund.status !== RefundStatus.APPROVED) {
+      throw new BadRequestException(
+        'Only approved refunds can be executed',
+      );
+    }
+
+    const payment = await this.prisma.payment.findUnique({
+      where: { id: refund.paymentId },
+    });
+    if (!payment) {
+      throw new NotFoundException('Payment not found');
+    }
+    this.assertPaymentRefundable(payment);
+
+    await this.auditService.log({
+      action: 'REFUND_EXECUTING',
+      entity: 'Refund',
+      entityId: refund.id,
+      hospitalId: user.hospitalId,
+      branchId: refund.branchId,
+      userId: user.sub,
+      metadata: {
+        paymentId: payment.id,
+        invoiceId: payment.invoiceId,
+        amount: this.formatAmount(refund.amount),
+        approvedByUserId: refund.approvedByUserId,
       },
     });
 
@@ -250,9 +484,9 @@ export class RefundsService {
       const providerRefund = await this.razorpayService.createRefund({
         refundId: refund.id,
         providerPaymentId: payment.providerPaymentId!,
-        amount: this.formatAmount(requestedAmount),
+        amount: this.formatAmount(refund.amount),
         currency: payment.currency,
-        reason: dto.reason,
+        reason: refund.reason ?? undefined,
       });
 
       const updatedRefund = await this.prisma.refund.update({
@@ -282,6 +516,32 @@ export class RefundsService {
 
       return this.formatRefundResponse(updatedRefund);
     } catch (error) {
+      if (error instanceof RazorpayError && error.kind === 'ambiguous') {
+        const uncertainRefund = await this.prisma.refund.update({
+          where: { id: refund.id },
+          data: {
+            status: RefundStatus.SUBMIT_UNCERTAIN,
+            failureReason: this.sanitizeFailureReason(error.message),
+          },
+        });
+
+        await this.auditService.log({
+          action: 'REFUND_SUBMIT_UNCERTAIN',
+          entity: 'Refund',
+          entityId: uncertainRefund.id,
+          hospitalId: user.hospitalId,
+          branchId: uncertainRefund.branchId,
+          userId: user.sub,
+          metadata: {
+            paymentId: payment.id,
+            invoiceId: payment.invoiceId,
+            amount: this.formatAmount(uncertainRefund.amount),
+          },
+        });
+
+        return this.formatRefundResponse(uncertainRefund);
+      }
+
       const failureReason = this.sanitizeFailureReason(
         error instanceof Error ? error.message : 'Refund request failed',
       );
@@ -375,7 +635,38 @@ export class RefundsService {
     eventType: string,
   ) {
     const lookup = this.resolveRefundLookup(payload);
-    const refund = await this.findRefundForWebhook(lookup);
+    let refund = await this.findRefundForWebhook(lookup);
+
+    if (!refund && lookup.providerPaymentId) {
+      const uncertainCandidates = await this.prisma.refund.findMany({
+        where: {
+          providerPaymentId: lookup.providerPaymentId,
+          status: RefundStatus.SUBMIT_UNCERTAIN,
+        },
+      });
+
+      if (uncertainCandidates.length > 1) {
+        await this.auditService.log({
+          action: 'REFUND_WEBHOOK_PROCESSED',
+          entity: 'Refund',
+          entityId: uncertainCandidates[0]!.id,
+          hospitalId: uncertainCandidates[0]!.hospitalId,
+          branchId: uncertainCandidates[0]!.branchId,
+          metadata: {
+            rejected: true,
+            reason: 'ambiguous_uncertain_refund',
+            candidateRefundIds: uncertainCandidates.map((row) => row.id),
+            providerPaymentId: lookup.providerPaymentId,
+          },
+        });
+
+        return { processed: false, reason: 'refund_ambiguous_uncertain' };
+      }
+
+      if (uncertainCandidates.length === 1) {
+        refund = uncertainCandidates[0]!;
+      }
+    }
 
     if (!refund) {
       return { processed: false, reason: 'refund_not_found' };
@@ -526,10 +817,7 @@ export class RefundsService {
       return 'amount_mismatch';
     }
 
-    if (
-      refund.status !== RefundStatus.PROCESSING &&
-      refund.status !== RefundStatus.REQUESTED
-    ) {
+    if (!REFUND_RECONCILIATION_RESOLVABLE_STATUSES.includes(refund.status)) {
       return 'ignored';
     }
 
@@ -537,9 +825,10 @@ export class RefundsService {
     const providerRefundId = refundEntity?.id ?? refund.providerRefundId;
 
     try {
-      await tx.refund.update({
+      const updated = await tx.refund.updateMany({
         where: {
           id: refund.id,
+          status: { in: REFUND_RECONCILIATION_RESOLVABLE_STATUSES },
         },
         data: {
           status: RefundStatus.SUCCEEDED,
@@ -549,6 +838,10 @@ export class RefundsService {
           failureReason: null,
         },
       });
+
+      if (updated.count === 0) {
+        return 'ignored';
+      }
     } catch (error) {
       if (
         error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -562,6 +855,32 @@ export class RefundsService {
 
     const payment = await tx.payment.findUnique({
       where: { id: refund.paymentId },
+    });
+
+    if (payment) {
+      const invoice = await tx.invoice.findUnique({
+        where: { id: payment.invoiceId },
+      });
+      if (invoice) {
+        await this.invoiceSplitPayerService.syncInvoiceSettlementStatus(
+          tx,
+          invoice,
+          { source: 'refund_succeeded', refundId: refund.id },
+        );
+      }
+    }
+
+    await this.auditService.log({
+      action: 'PAYER_PAYMENT_REFUNDED',
+      entity: 'Refund',
+      entityId: refund.id,
+      hospitalId: refund.hospitalId,
+      branchId: refund.branchId,
+      metadata: {
+        paymentId: refund.paymentId,
+        invoiceId: payment?.invoiceId,
+        amount: this.formatAmount(refund.amount),
+      },
     });
 
     await this.auditService.log({

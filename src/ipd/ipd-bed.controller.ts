@@ -17,9 +17,13 @@ import { BedQueryDto } from './dto/bed-query.dto';
 import { CreateBedDto } from './dto/create-bed.dto';
 import { UpdateBedDto } from './dto/update-bed.dto';
 import { IpdBedService } from './ipd-bed.service';
+import { FeatureGuard } from '../plans/feature.guard';
+import { RequireFeature } from '../plans/require-feature.decorator';
+import { FeatureKey } from '../plans/feature-keys';
 
 @Controller('ipd/beds')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard, FeatureGuard)
+@RequireFeature(FeatureKey.IPD)
 export class IpdBedController {
   constructor(private readonly bedService: IpdBedService) {}
 

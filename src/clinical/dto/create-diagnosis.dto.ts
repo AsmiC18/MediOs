@@ -6,9 +6,11 @@ export class CreateDiagnosisDto {
   @MinLength(1)
   code: string;
 
+  /** Ignored when persisting; authoritative description comes from the ICD-10 catalogue. */
   @IsString()
   @MinLength(1)
-  description: string;
+  @IsOptional()
+  description?: string;
 
   @IsEnum(ClinicalDiagnosisType)
   @IsOptional()

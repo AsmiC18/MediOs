@@ -12,9 +12,13 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { ClinicalService } from './clinical.service';
 import { UpdateDiagnosisDto } from './dto/update-diagnosis.dto';
+import { FeatureGuard } from '../plans/feature.guard';
+import { RequireFeature } from '../plans/require-feature.decorator';
+import { FeatureKey } from '../plans/feature-keys';
 
 @Controller('clinical/diagnoses')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard, FeatureGuard)
+@RequireFeature(FeatureKey.CLINICAL)
 export class ClinicalDiagnosisController {
   constructor(private readonly clinicalService: ClinicalService) {}
 

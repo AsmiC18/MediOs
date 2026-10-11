@@ -24,7 +24,9 @@ export class PermissionsGuard implements CanActivate {
       ]);
 
     if (!requiredPermissions || requiredPermissions.length === 0) {
-      return true;
+      throw new ForbiddenException(
+        'Route requires @RequirePermissions when PermissionsGuard is applied',
+      );
     }
 
     const request = context.switchToHttp().getRequest();

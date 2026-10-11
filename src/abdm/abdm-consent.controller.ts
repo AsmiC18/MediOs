@@ -17,9 +17,13 @@ import { AbdmConsentService } from './abdm-consent.service';
 import { ConsentQueryDto } from './dto/consent-query.dto';
 import { CreateConsentDto } from './dto/create-consent.dto';
 import { UpdateConsentStatusDto } from './dto/update-consent-status.dto';
+import { FeatureGuard } from '../plans/feature.guard';
+import { RequireFeature } from '../plans/require-feature.decorator';
+import { FeatureKey } from '../plans/feature-keys';
 
 @Controller()
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard, FeatureGuard)
+@RequireFeature(FeatureKey.ABDM)
 export class AbdmConsentController {
   constructor(private readonly consentService: AbdmConsentService) {}
 

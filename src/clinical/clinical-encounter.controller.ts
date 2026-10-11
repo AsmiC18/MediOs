@@ -17,9 +17,14 @@ import { CreateDiagnosisDto } from './dto/create-diagnosis.dto';
 import { CreateEncounterDto } from './dto/create-encounter.dto';
 import { CreatePrescriptionDto } from './dto/create-prescription.dto';
 import { UpsertSoapDto } from './dto/upsert-soap.dto';
+import { SoapVersionQueryDto } from './dto/soap-version-query.dto';
+import { FeatureGuard } from '../plans/feature.guard';
+import { RequireFeature } from '../plans/require-feature.decorator';
+import { FeatureKey } from '../plans/feature-keys';
 
 @Controller('clinical/encounters')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard, FeatureGuard)
+@RequireFeature(FeatureKey.CLINICAL)
 export class ClinicalEncounterController {
   constructor(private readonly clinicalService: ClinicalService) {}
 
@@ -61,6 +66,16 @@ export class ClinicalEncounterController {
     @Body() dto: UpsertSoapDto,
   ) {
     return this.clinicalService.createOrUpdateSoap(req.user, id, dto);
+  }
+
+  @Get(':id/soap/versions')
+  @RequirePermissions('clinical:read')
+  listSoapVersions(
+    @Request() req: any,
+    @Param('id') id: string,
+    @Query() query: SoapVersionQueryDto,
+  ) {
+    return this.clinicalService.listSoapVersions(req.user, id, query);
   }
 
   @Get(':id/soap')

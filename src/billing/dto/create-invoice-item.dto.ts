@@ -5,31 +5,42 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   Max,
   Min,
   ValidateIf,
 } from 'class-validator';
+import { HSN_SAC_PATTERN } from '../utils/gst.util';
 
 export class CreateInvoiceItemDto {
+  @IsOptional()
+  @IsUUID()
+  billingCatalogueItemId?: string;
+
+  @ValidateIf((item: CreateInvoiceItemDto) => !item.billingCatalogueItemId)
   @IsString()
   @IsNotEmpty()
-  description: string;
+  description?: string;
 
   @Type(() => Number)
   @IsInt()
   @Min(1)
   quantity: number;
 
+  @ValidateIf((item: CreateInvoiceItemDto) => !item.billingCatalogueItemId)
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
-  unitPrice: number;
+  unitPrice?: number;
 
-  @ValidateIf((item: CreateInvoiceItemDto) => (item.gstRate ?? 0) > 0)
+  @ValidateIf(
+    (item: CreateInvoiceItemDto) =>
+      !item.billingCatalogueItemId && (item.gstRate ?? 0) > 0,
+  )
   @IsString()
   @IsNotEmpty()
-  @Matches(/^[0-9A-Za-z]{4,8}$/, {
+  @Matches(HSN_SAC_PATTERN, {
     message: 'hsnSac must be 4 to 8 alphanumeric characters',
   })
   hsnSac?: string;

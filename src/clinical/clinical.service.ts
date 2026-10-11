@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -12,6 +13,10 @@ import {
   Prisma,
 } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
+import {
+  applyBranchScope,
+  assertBranchAccess,
+} from '../common/auth/branch-scope.util';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateDiagnosisDto } from './dto/create-diagnosis.dto';
 import { CreateEncounterDto } from './dto/create-encounter.dto';
@@ -19,14 +24,27 @@ import { CreatePrescriptionDto } from './dto/create-prescription.dto';
 import { UpdateDiagnosisDto } from './dto/update-diagnosis.dto';
 import { UpdatePrescriptionStatusDto } from './dto/update-prescription-status.dto';
 import { UpsertSoapDto } from './dto/upsert-soap.dto';
+import { SoapVersionQueryDto } from './dto/soap-version-query.dto';
+import { SoapVersionListResponseDto } from './dto/soap-version-response.dto';
+import {
+  areSoapContentsEqual,
+  mergeSoapContent,
+  soapContentFromDto,
+  soapContentFromNote,
+  soapContentToWriteData,
+} from './utils/soap-content.util';
 import { isAllowedEncounterTransition } from './utils/encounter-transitions.util';
-import { validateIcd10Code } from './utils/icd10-format.util';
-import { checkDocumentedAllergies } from './utils/medication-safety.util';
+import { Icd10Service } from './icd10/icd10.service';
+import { ClinicalPrescriptionOutboxService } from './events/clinical-prescription-outbox.service';
+import { PrescriptionSafetyService } from './safety/prescription-safety.service';
+import { SafetyOverrideInput } from './safety/safety.types';
+import { mapAllergyWarningsFromFindings } from './utils/prescription-response.util';
 
 type AuthenticatedUser = {
   sub: string;
   hospitalId: string;
   branchId?: string | null;
+  roleId?: string;
 };
 
 const encounterInclude = {
@@ -56,11 +74,17 @@ const encounterInclude = {
   },
 } satisfies Prisma.ClinicalEncounterInclude;
 
+const SOAP_VERSION_DEFAULT_PAGE = 1;
+const SOAP_VERSION_DEFAULT_LIMIT = 20;
+
 @Injectable()
 export class ClinicalService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly prescriptionSafetyService: PrescriptionSafetyService,
+    private readonly clinicalPrescriptionOutboxService: ClinicalPrescriptionOutboxService,
+    private readonly icd10Service: Icd10Service,
   ) {}
 
   private async validatePatient(user: AuthenticatedUser, patientId: string) {
@@ -76,7 +100,27 @@ export class ClinicalService {
       throw new BadRequestException('Patient record is not active');
     }
 
+    if (patient.branchId != null) {
+      assertBranchAccess(user, patient.branchId);
+    }
+
     return patient;
+  }
+
+  private async validateBranch(user: AuthenticatedUser, branchId: string) {
+    const branch = await this.prisma.branch.findUnique({
+      where: { id: branchId },
+    });
+
+    if (!branch) {
+      throw new NotFoundException('Branch not found');
+    }
+
+    if (branch.hospitalId !== user.hospitalId) {
+      throw new ForbiddenException('Branch does not belong to your hospital');
+    }
+
+    return branch;
   }
 
   private async validateProvider(user: AuthenticatedUser, providerUserId: string) {
@@ -100,6 +144,8 @@ export class ClinicalService {
     if (!encounter || encounter.hospitalId !== user.hospitalId) {
       throw new NotFoundException('Clinical encounter not found');
     }
+
+    assertBranchAccess(user, encounter.branchId);
 
     return encounter;
   }
@@ -183,6 +229,7 @@ export class ClinicalService {
         );
       }
 
+      assertBranchAccess(user, appointment.branchId);
       branchId = appointment.branchId;
     }
 
@@ -207,6 +254,7 @@ export class ClinicalService {
         );
       }
 
+      assertBranchAccess(user, admission.branchId);
       branchId = admission.branchId;
     }
 
@@ -249,22 +297,58 @@ export class ClinicalService {
   }
 
   async getEncounter(user: AuthenticatedUser, encounterId: string) {
-    return this.findOwnedEncounter(user, encounterId);
+    const encounter = await this.findOwnedEncounter(user, encounterId);
+    await this.auditService.log({
+      action: 'CLINICAL_ENCOUNTER_READ',
+      entity: 'ClinicalEncounter',
+      entityId: encounter.id,
+      hospitalId: user.hospitalId,
+      branchId: encounter.branchId,
+      userId: user.sub,
+      metadata: { patientId: encounter.patientId },
+    });
+    return encounter;
   }
 
-  async listEncounters(user: AuthenticatedUser, patientId?: string) {
+  async listEncounters(
+    user: AuthenticatedUser,
+    patientId?: string,
+    branchId?: string,
+  ) {
     if (patientId) {
       await this.validatePatient(user, patientId);
     }
 
-    return this.prisma.clinicalEncounter.findMany({
-      where: {
-        hospitalId: user.hospitalId,
-        ...(patientId !== undefined && { patientId }),
-      },
+    if (user.branchId == null && branchId) {
+      await this.validateBranch(user, branchId);
+    }
+
+    const where = applyBranchScope(user, {
+      hospitalId: user.hospitalId,
+      ...(patientId !== undefined && { patientId }),
+      ...(branchId !== undefined && { branchId }),
+    });
+
+    const encounters = await this.prisma.clinicalEncounter.findMany({
+      where,
       include: encounterInclude,
       orderBy: { startedAt: 'desc' },
     });
+
+    await this.auditService.log({
+      action: 'CLINICAL_ENCOUNTER_LIST_READ',
+      entity: patientId ? 'Patient' : 'ClinicalEncounter',
+      entityId: patientId ?? null,
+      hospitalId: user.hospitalId,
+      branchId: user.branchId ?? branchId ?? null,
+      userId: user.sub,
+      metadata: {
+        scope: patientId ? 'patient' : 'hospital',
+        resultCount: encounters.length,
+      },
+    });
+
+    return encounters;
   }
 
   async completeEncounter(user: AuthenticatedUser, encounterId: string) {
@@ -334,25 +418,89 @@ export class ClinicalService {
     const encounter = await this.findOwnedEncounter(user, encounterId);
     this.assertEncounterModifiable(encounter.status);
 
-    const existing = await this.prisma.clinicalSoapNote.findUnique({
-      where: { encounterId },
-    });
+    const outcome = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT id FROM "ClinicalEncounter" WHERE id = ${encounterId} FOR UPDATE`;
 
-    if (existing) {
-      const updated = await this.prisma.clinicalSoapNote.update({
+      const existing = await tx.clinicalSoapNote.findUnique({
         where: { encounterId },
+      });
+
+      if (!existing) {
+        const content = soapContentFromDto(dto);
+        const created = await tx.clinicalSoapNote.create({
+          data: {
+            hospitalId: user.hospitalId,
+            encounterId,
+            ...soapContentToWriteData(content),
+            createdByUserId: user.sub,
+          },
+        });
+
+        await tx.clinicalSoapNoteVersion.create({
+          data: {
+            hospitalId: user.hospitalId,
+            encounterId,
+            version: 1,
+            ...soapContentToWriteData(content),
+            createdByUserId: user.sub,
+          },
+        });
+
+        return { note: created, created: true, updated: false };
+      }
+
+      await tx.$executeRaw`SELECT id FROM "ClinicalSoapNote" WHERE "encounterId" = ${encounterId} FOR UPDATE`;
+
+      const current = await tx.clinicalSoapNote.findUniqueOrThrow({
+        where: { encounterId },
+      });
+
+      const merged = mergeSoapContent(soapContentFromNote(current), dto);
+      const previous = soapContentFromNote(current);
+
+      if (areSoapContentsEqual(merged, previous)) {
+        return { note: current, created: false, updated: false };
+      }
+
+      const versionAgg = await tx.clinicalSoapNoteVersion.aggregate({
+        where: { encounterId },
+        _max: { version: true },
+      });
+      const nextVersion = (versionAgg._max.version ?? 0) + 1;
+
+      await tx.clinicalSoapNoteVersion.create({
         data: {
-          ...(dto.subjective !== undefined && { subjective: dto.subjective }),
-          ...(dto.objective !== undefined && { objective: dto.objective }),
-          ...(dto.assessment !== undefined && { assessment: dto.assessment }),
-          ...(dto.plan !== undefined && { plan: dto.plan }),
+          hospitalId: user.hospitalId,
+          encounterId,
+          version: nextVersion,
+          ...soapContentToWriteData(merged),
+          createdByUserId: user.sub,
         },
       });
 
+      const updated = await tx.clinicalSoapNote.update({
+        where: { encounterId },
+        data: soapContentToWriteData(merged),
+      });
+
+      return { note: updated, created: false, updated: true };
+    });
+
+    if (outcome.created) {
+      await this.auditService.log({
+        action: 'CLINICAL_SOAP_CREATED',
+        entity: 'ClinicalSoapNote',
+        entityId: outcome.note.id,
+        hospitalId: user.hospitalId,
+        branchId: encounter.branchId,
+        userId: user.sub,
+        metadata: { encounterId },
+      });
+    } else if (outcome.updated) {
       await this.auditService.log({
         action: 'CLINICAL_SOAP_UPDATED',
         entity: 'ClinicalSoapNote',
-        entityId: updated.id,
+        entityId: outcome.note.id,
         hospitalId: user.hospitalId,
         branchId: encounter.branchId,
         userId: user.sub,
@@ -361,37 +509,58 @@ export class ClinicalService {
           encounterStatus: encounter.status,
         },
       });
-
-      return updated;
     }
 
-    const created = await this.prisma.clinicalSoapNote.create({
-      data: {
-        hospitalId: user.hospitalId,
-        encounterId,
-        subjective: dto.subjective,
-        objective: dto.objective,
-        assessment: dto.assessment,
-        plan: dto.plan,
-        createdByUserId: user.sub,
-      },
-    });
+    return outcome.note;
+  }
 
-    await this.auditService.log({
-      action: 'CLINICAL_SOAP_CREATED',
-      entity: 'ClinicalSoapNote',
-      entityId: created.id,
+  async listSoapVersions(
+    user: AuthenticatedUser,
+    encounterId: string,
+    query: SoapVersionQueryDto = {},
+  ): Promise<SoapVersionListResponseDto> {
+    await this.findOwnedEncounter(user, encounterId);
+
+    const page = query.page ?? SOAP_VERSION_DEFAULT_PAGE;
+    const limit = query.limit ?? SOAP_VERSION_DEFAULT_LIMIT;
+
+    const where = {
       hospitalId: user.hospitalId,
-      branchId: encounter.branchId,
-      userId: user.sub,
-      metadata: { encounterId },
-    });
+      encounterId,
+    };
 
-    return created;
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.clinicalSoapNoteVersion.count({ where }),
+      this.prisma.clinicalSoapNoteVersion.findMany({
+        where,
+        orderBy: { version: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        select: {
+          version: true,
+          subjective: true,
+          objective: true,
+          assessment: true,
+          plan: true,
+          createdByUserId: true,
+          createdAt: true,
+        },
+      }),
+    ]);
+
+    return {
+      data: rows,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit) || 0,
+      },
+    };
   }
 
   async getSoap(user: AuthenticatedUser, encounterId: string) {
-    await this.findOwnedEncounter(user, encounterId);
+    const encounter = await this.findOwnedEncounter(user, encounterId);
 
     const soap = await this.prisma.clinicalSoapNote.findUnique({
       where: { encounterId },
@@ -400,6 +569,16 @@ export class ClinicalService {
     if (!soap || soap.hospitalId !== user.hospitalId) {
       throw new NotFoundException('SOAP note not found');
     }
+
+    await this.auditService.log({
+      action: 'CLINICAL_SOAP_READ',
+      entity: 'ClinicalEncounter',
+      entityId: encounterId,
+      hospitalId: user.hospitalId,
+      branchId: encounter.branchId,
+      userId: user.sub,
+      metadata: { patientId: encounter.patientId },
+    });
 
     return soap;
   }
@@ -412,22 +591,14 @@ export class ClinicalService {
     const encounter = await this.findOwnedEncounter(user, encounterId);
     this.assertEncounterModifiable(encounter.status);
 
-    let code: string;
-
-    try {
-      code = validateIcd10Code(dto.code);
-    } catch (error) {
-      throw new BadRequestException(
-        error instanceof Error ? error.message : 'Invalid ICD-10 code',
-      );
-    }
+    const catalogue = await this.icd10Service.validateActiveCode(dto.code);
 
     const diagnosis = await this.prisma.clinicalDiagnosis.create({
       data: {
         hospitalId: user.hospitalId,
         encounterId,
-        code,
-        description: dto.description.trim(),
+        code: catalogue.code,
+        description: catalogue.description,
         diagnosisType: dto.diagnosisType,
         createdByUserId: user.sub,
       },
@@ -451,7 +622,17 @@ export class ClinicalService {
   }
 
   async listDiagnoses(user: AuthenticatedUser, encounterId: string) {
-    await this.findOwnedEncounter(user, encounterId);
+    const encounter = await this.findOwnedEncounter(user, encounterId);
+
+    await this.auditService.log({
+      action: 'CLINICAL_DIAGNOSIS_LIST_READ',
+      entity: 'ClinicalEncounter',
+      entityId: encounterId,
+      hospitalId: user.hospitalId,
+      branchId: encounter.branchId,
+      userId: user.sub,
+      metadata: { patientId: encounter.patientId },
+    });
 
     return this.prisma.clinicalDiagnosis.findMany({
       where: {
@@ -476,27 +657,22 @@ export class ClinicalService {
       throw new NotFoundException('Diagnosis not found');
     }
 
+    assertBranchAccess(user, existing.encounter.branchId);
     this.assertEncounterModifiable(existing.encounter.status);
 
     let code = existing.code;
+    let description = existing.description;
 
     if (dto.code !== undefined) {
-      try {
-        code = validateIcd10Code(dto.code);
-      } catch (error) {
-        throw new BadRequestException(
-          error instanceof Error ? error.message : 'Invalid ICD-10 code',
-        );
-      }
+      const catalogue = await this.icd10Service.validateActiveCode(dto.code);
+      code = catalogue.code;
+      description = catalogue.description;
     }
 
     const updated = await this.prisma.clinicalDiagnosis.update({
       where: { id: diagnosisId },
       data: {
-        ...(dto.code !== undefined && { code }),
-        ...(dto.description !== undefined && {
-          description: dto.description.trim(),
-        }),
+        ...(dto.code !== undefined && { code, description }),
         ...(dto.diagnosisType !== undefined && {
           diagnosisType: dto.diagnosisType,
         }),
@@ -526,6 +702,7 @@ export class ClinicalService {
       throw new NotFoundException('Diagnosis not found');
     }
 
+    assertBranchAccess(user, existing.encounter.branchId);
     this.assertEncounterModifiable(existing.encounter.status);
 
     await this.prisma.clinicalDiagnosis.delete({
@@ -558,56 +735,186 @@ export class ClinicalService {
     }
 
     const patient = await this.validatePatient(user, encounter.patientId);
-    const allergyWarnings = checkDocumentedAllergies(
-      patient.allergies,
-      dto.items.map((item) => item.medicationName),
+
+    const evaluation = await this.prescriptionSafetyService.evaluateForPrescription(
+      {
+        hospitalId: user.hospitalId,
+        patientId: encounter.patientId,
+        patientAllergies: patient.allergies,
+        patientUpdatedAt: patient.updatedAt,
+        dto,
+      },
     );
 
-    const prescription = await this.prisma.prescription.create({
-      data: {
-        hospitalId: user.hospitalId,
-        encounterId,
-        patientId: encounter.patientId,
-        prescribedByUserId: user.sub,
-        notes: dto.notes,
-        items: {
-          create: dto.items.map((item) => ({
-            medicationName: item.medicationName.trim(),
-            dosage: item.dosage,
-            route: item.route,
-            frequency: item.frequency,
-            duration: item.duration,
-            instructions: item.instructions,
-            quantity: item.quantity,
-          })),
+    const hasOverridePermission = user.roleId
+      ? await this.prescriptionSafetyService.userHasSafetyOverridePermission(
+          user.roleId,
+        )
+      : false;
+
+    const safetyOverride: SafetyOverrideInput | undefined = dto.safetyOverrides
+      ? {
+          findingKeys: dto.safetyOverrides.findingKeys,
+          reason: dto.safetyOverrides.reason,
+        }
+      : undefined;
+
+    const findingsToPersist = this.prescriptionSafetyService.assertCanPersist(
+      evaluation,
+      safetyOverride,
+      hasOverridePermission,
+    );
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const prescription = await tx.prescription.create({
+        data: {
+          hospitalId: user.hospitalId,
+          encounterId,
+          patientId: encounter.patientId,
+          prescribedByUserId: user.sub,
+          notes: dto.notes,
+          items: {
+            create: evaluation.resolvedLines.map((line, index) => {
+              const item = dto.items[index]!;
+              return {
+                medicationName: line.medicationName.trim(),
+                clinicalDrugId: line.clinicalDrugId,
+                drugResolutionStatus: line.drugResolutionStatus,
+                dosage: item.dosage,
+                route: item.route,
+                frequency: item.frequency,
+                duration: item.duration,
+                instructions: item.instructions,
+                quantity: item.quantity,
+              };
+            }),
+          },
         },
-      },
-      include: { items: true },
+        include: { items: true },
+      });
+
+      const safetyEvaluation = await tx.prescriptionSafetyEvaluation.create({
+        data: {
+          prescriptionId: prescription.id,
+          hospitalId: user.hospitalId,
+          evaluatorVersion:
+            this.prescriptionSafetyService.getEvaluatorVersion(),
+          interactionAdapterStatus: evaluation.interactionAdapterStatus,
+          patientUpdatedAt: evaluation.patientUpdatedAt,
+        },
+      });
+
+      if (findingsToPersist.length > 0) {
+        await tx.prescriptionSafetyFinding.createMany({
+          data: findingsToPersist.map((finding) => ({
+            hospitalId: user.hospitalId,
+            evaluationId: safetyEvaluation.id,
+            findingKey: finding.findingKey,
+            findingType: finding.findingType,
+            severity: finding.severity,
+            summary: finding.summary,
+            detailJson:
+              finding.detailJson === undefined
+                ? Prisma.JsonNull
+                : (finding.detailJson as Prisma.InputJsonValue),
+            source: finding.source,
+            overridden: finding.overridden ?? false,
+            overrideReason: finding.overrideReason ?? null,
+            overrideByUserId: finding.overridden ? user.sub : null,
+            overrideAt: finding.overrideAt ?? null,
+          })),
+        });
+      }
+
+      const safetyEvaluationWithFindings =
+        await tx.prescriptionSafetyEvaluation.findUniqueOrThrow({
+          where: { id: safetyEvaluation.id },
+          include: { findings: true },
+        });
+
+      await this.auditService.logInTransaction(tx, {
+        action: 'CLINICAL_PRESCRIPTION_CREATED',
+        entity: 'Prescription',
+        entityId: prescription.id,
+        hospitalId: user.hospitalId,
+        branchId: encounter.branchId,
+        userId: user.sub,
+        metadata: {
+          encounterId,
+          patientId: encounter.patientId,
+          itemCount: prescription.items.length,
+        },
+      });
+
+      await this.auditService.logInTransaction(tx, {
+        action: 'CLINICAL_PRESCRIPTION_SAFETY_EVALUATED',
+        entity: 'PrescriptionSafetyEvaluation',
+        entityId: safetyEvaluation.id,
+        hospitalId: user.hospitalId,
+        branchId: encounter.branchId,
+        userId: user.sub,
+        metadata: {
+          prescriptionId: prescription.id,
+          findingCount: safetyEvaluationWithFindings.findings.length,
+        },
+      });
+
+      if (findingsToPersist.some((finding) => finding.overridden)) {
+        await this.auditService.logInTransaction(tx, {
+          action: 'CLINICAL_PRESCRIPTION_SAFETY_OVERRIDE',
+          entity: 'Prescription',
+          entityId: prescription.id,
+          hospitalId: user.hospitalId,
+          branchId: encounter.branchId,
+          userId: user.sub,
+          metadata: {
+            findingKeys: findingsToPersist
+              .filter((finding) => finding.overridden)
+              .map((finding) => finding.findingKey),
+          },
+        });
+      }
+
+      await this.clinicalPrescriptionOutboxService.emitPrescriptionCreatedInTransaction(
+        tx,
+        {
+          prescription: {
+            id: prescription.id,
+            hospitalId: prescription.hospitalId,
+            branchId: encounter.branchId,
+            patientId: prescription.patientId,
+            encounterId: prescription.encounterId,
+            status: prescription.status,
+          },
+          actorUserId: user.sub,
+        },
+      );
+
+      return { prescription, safetyEvaluation: safetyEvaluationWithFindings };
     });
 
-    await this.auditService.log({
-      action: 'CLINICAL_PRESCRIPTION_CREATED',
-      entity: 'Prescription',
-      entityId: prescription.id,
-      hospitalId: user.hospitalId,
-      branchId: encounter.branchId,
-      userId: user.sub,
-      metadata: {
-        encounterId,
-        patientId: encounter.patientId,
-        itemCount: prescription.items.length,
-      },
-    });
+    const allergyWarnings = mapAllergyWarningsFromFindings(findingsToPersist);
 
     return {
-      ...prescription,
+      ...result.prescription,
       allergyWarnings,
-      interactionCheckAvailable: false,
+      interactionCheckAvailable: evaluation.interactionCheckAvailable,
+      safetyFindings: result.safetyEvaluation.findings,
     };
   }
 
   async listPrescriptions(user: AuthenticatedUser, encounterId: string) {
-    await this.findOwnedEncounter(user, encounterId);
+    const encounter = await this.findOwnedEncounter(user, encounterId);
+
+    await this.auditService.log({
+      action: 'CLINICAL_PRESCRIPTION_LIST_READ',
+      entity: 'ClinicalEncounter',
+      entityId: encounterId,
+      hospitalId: user.hospitalId,
+      branchId: encounter.branchId,
+      userId: user.sub,
+      metadata: { patientId: encounter.patientId },
+    });
 
     return this.prisma.prescription.findMany({
       where: {
@@ -629,6 +936,21 @@ export class ClinicalService {
       throw new NotFoundException('Prescription not found');
     }
 
+    assertBranchAccess(user, prescription.encounter.branchId);
+
+    await this.auditService.log({
+      action: 'CLINICAL_PRESCRIPTION_READ',
+      entity: 'Prescription',
+      entityId: prescriptionId,
+      hospitalId: user.hospitalId,
+      branchId: prescription.encounter.branchId,
+      userId: user.sub,
+      metadata: {
+        patientId: prescription.patientId,
+        encounterId: prescription.encounterId,
+      },
+    });
+
     return prescription;
   }
 
@@ -646,6 +968,8 @@ export class ClinicalService {
       throw new NotFoundException('Prescription not found');
     }
 
+    assertBranchAccess(user, existing.encounter.branchId);
+
     if (existing.status === dto.status) {
       return this.getPrescription(user, prescriptionId);
     }
@@ -657,24 +981,45 @@ export class ClinicalService {
       throw new BadRequestException('Terminal prescriptions cannot change status');
     }
 
-    const updated = await this.prisma.prescription.update({
-      where: { id: prescriptionId },
-      data: { status: dto.status },
-      include: { items: true },
-    });
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const prescription = await tx.prescription.update({
+        where: { id: prescriptionId },
+        data: { status: dto.status },
+        include: { items: true, encounter: true },
+      });
 
-    await this.auditService.log({
-      action: 'CLINICAL_PRESCRIPTION_STATUS_CHANGED',
-      entity: 'Prescription',
-      entityId: prescriptionId,
-      hospitalId: user.hospitalId,
-      branchId: existing.encounter.branchId,
-      userId: user.sub,
-      metadata: {
-        previousStatus: existing.status,
-        newStatus: dto.status,
-        encounterId: existing.encounterId,
-      },
+      await this.auditService.logInTransaction(tx, {
+        action: 'CLINICAL_PRESCRIPTION_STATUS_CHANGED',
+        entity: 'Prescription',
+        entityId: prescriptionId,
+        hospitalId: user.hospitalId,
+        branchId: existing.encounter.branchId,
+        userId: user.sub,
+        metadata: {
+          previousStatus: existing.status,
+          newStatus: dto.status,
+          encounterId: existing.encounterId,
+        },
+      });
+
+      await this.clinicalPrescriptionOutboxService.emitPrescriptionStatusChangedInTransaction(
+        tx,
+        {
+          prescription: {
+            id: prescription.id,
+            hospitalId: prescription.hospitalId,
+            branchId: prescription.encounter.branchId,
+            patientId: prescription.patientId,
+            encounterId: prescription.encounterId,
+            status: prescription.status,
+          },
+          actorUserId: user.sub,
+          previousStatus: existing.status,
+          newStatus: dto.status,
+        },
+      );
+
+      return prescription;
     });
 
     return updated;
@@ -683,14 +1028,55 @@ export class ClinicalService {
   async getPatientClinicalRecords(user: AuthenticatedUser, patientId: string) {
     await this.validatePatient(user, patientId);
 
-    const encounters = await this.prisma.clinicalEncounter.findMany({
-      where: {
-        hospitalId: user.hospitalId,
-        patientId,
-      },
+    const encounters = await this.queryPatientClinicalEncounters(
+      user,
+      patientId,
+    );
+
+    return {
+      patientId,
+      encounters,
+    };
+  }
+
+  private async queryPatientClinicalEncounters(
+    user: AuthenticatedUser,
+    patientId: string,
+  ) {
+    const where = applyBranchScope(user, {
+      hospitalId: user.hospitalId,
+      patientId,
+    });
+
+    return this.prisma.clinicalEncounter.findMany({
+      where,
       include: encounterInclude,
       orderBy: { startedAt: 'desc' },
     });
+  }
+
+  async getPatientClinicalRecordsForPortal(
+    scope: { hospitalId: string; branchId: string | null },
+    patientId: string,
+  ) {
+    const patient = await this.prisma.patient.findUnique({
+      where: { id: patientId },
+    });
+    if (!patient || patient.hospitalId !== scope.hospitalId) {
+      throw new NotFoundException('Patient not found');
+    }
+    if (scope.branchId != null && patient.branchId !== scope.branchId) {
+      throw new ForbiddenException('Access to this branch is not permitted');
+    }
+
+    const encounters = await this.queryPatientClinicalEncounters(
+      {
+        sub: patientId,
+        hospitalId: scope.hospitalId,
+        branchId: scope.branchId,
+      },
+      patientId,
+    );
 
     return {
       patientId,

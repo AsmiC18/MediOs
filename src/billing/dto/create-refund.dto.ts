@@ -1,12 +1,12 @@
-import { IsNumber, IsOptional, IsString, MaxLength, Min } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsString, MaxLength, Min } from 'class-validator';
 
 export class CreateRefundDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0.01)
   amount!: number;
 
-  @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @MaxLength(500)
-  reason?: string;
+  reason!: string;
 }

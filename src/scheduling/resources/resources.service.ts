@@ -5,6 +5,12 @@ import {
 } from '@nestjs/common';
 import { ResourceStatus, ResourceType } from '@prisma/client';
 import { AuditService } from '../../audit/audit.service';
+import {
+  applyBranchScope,
+  assertBranchAccess,
+  resolveCreateBranchId,
+  resolveUpdateBranchId,
+} from '../../common/auth/branch-scope.util';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CreateResourceDto } from './dto/create-resource.dto';
 import { UpdateResourceDto } from './dto/update-resource.dto';
@@ -47,6 +53,10 @@ export class ResourcesService {
         'Branch does not belong to your hospital',
       );
     }
+
+    if (!branch.isActive) {
+      throw new ForbiddenException('Branch is not active');
+    }
   }
 
   private async findOwnedResource(user: AuthenticatedUser, resourceId: string) {
@@ -60,18 +70,22 @@ export class ResourcesService {
       throw new NotFoundException('Resource not found');
     }
 
+    assertBranchAccess(user, resource.branchId);
+
     return resource;
   }
 
   async create(user: AuthenticatedUser, dto: CreateResourceDto) {
-    if (dto.branchId) {
-      await this.validateBranch(user, dto.branchId);
+    const branchId = resolveCreateBranchId(user, dto.branchId);
+
+    if (branchId) {
+      await this.validateBranch(user, branchId);
     }
 
     const resource = await this.prisma.resource.create({
       data: {
         hospitalId: user.hospitalId,
-        branchId: dto.branchId,
+        branchId,
         type: dto.type,
         name: dto.name,
         description: dto.description,
@@ -91,13 +105,15 @@ export class ResourcesService {
   }
 
   async findAll(user: AuthenticatedUser, filters: ResourceFilters = {}) {
+    const where = applyBranchScope(user, {
+      hospitalId: user.hospitalId,
+      ...(filters.type !== undefined && { type: filters.type }),
+      ...(filters.status !== undefined && { status: filters.status }),
+      ...(filters.branchId !== undefined && { branchId: filters.branchId }),
+    });
+
     return this.prisma.resource.findMany({
-      where: {
-        hospitalId: user.hospitalId,
-        ...(filters.type !== undefined && { type: filters.type }),
-        ...(filters.status !== undefined && { status: filters.status }),
-        ...(filters.branchId !== undefined && { branchId: filters.branchId }),
-      },
+      where,
       orderBy: {
         createdAt: 'desc',
       },
@@ -115,8 +131,9 @@ export class ResourcesService {
   ) {
     await this.findOwnedResource(user, resourceId);
 
-    if (dto.branchId) {
-      await this.validateBranch(user, dto.branchId);
+    const branchId = resolveUpdateBranchId(user, dto.branchId);
+    if (branchId) {
+      await this.validateBranch(user, branchId);
     }
 
     const resource = await this.prisma.resource.update({
@@ -127,7 +144,7 @@ export class ResourcesService {
         ...(dto.name !== undefined && { name: dto.name }),
         ...(dto.description !== undefined && { description: dto.description }),
         ...(dto.status !== undefined && { status: dto.status }),
-        ...(dto.branchId !== undefined && { branchId: dto.branchId }),
+        ...(branchId !== undefined && { branchId }),
       },
     });
 

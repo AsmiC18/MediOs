@@ -4,9 +4,13 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermissions } from '../auth/decorators/permissions.decorator';
 import { StockAdjustDto } from './dto/stock-adjust.dto';
 import { PharmacyService } from './pharmacy.service';
+import { FeatureGuard } from '../plans/feature.guard';
+import { RequireFeature } from '../plans/require-feature.decorator';
+import { FeatureKey } from '../plans/feature-keys';
 
 @Controller('pharmacy/stock')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard, FeatureGuard)
+@RequireFeature(FeatureKey.PHARMACY)
 export class PharmacyStockController {
   constructor(private readonly pharmacyService: PharmacyService) {}
 

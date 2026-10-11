@@ -1,5 +1,6 @@
 import {
   IsInt,
+  IsOptional,
   Min,
   Validate,
   ValidationArguments,
@@ -40,4 +41,24 @@ export class CreateBookingRuleDto {
   @IsInt()
   @Min(1)
   slotDurationMinutes: number;
+
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  minimumAdvanceMinutes?: number;
+
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  maximumAdvanceMinutes?: number;
+
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  cancellationWindowMinutes?: number;
+
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  bufferMinutes?: number;
 }

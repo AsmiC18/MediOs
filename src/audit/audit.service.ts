@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { sanitizeAuditMetadata } from './audit-metadata.util';
 
 export interface CreateAuditLogInput {
   hospitalId: string;
@@ -17,6 +18,8 @@ export class AuditService {
   constructor(private readonly prisma: PrismaService) {}
 
   async log(input: CreateAuditLogInput) {
+    const metadata = sanitizeAuditMetadata(input.metadata ?? undefined);
+
     return this.prisma.auditLog.create({
       data: {
         hospitalId: input.hospitalId,
@@ -25,7 +28,26 @@ export class AuditService {
         action: input.action,
         entity: input.entity,
         entityId: input.entityId ?? undefined,
-        metadata: input.metadata ?? undefined,
+        metadata,
+      },
+    });
+  }
+
+  async logInTransaction(
+    client: Prisma.TransactionClient,
+    input: CreateAuditLogInput,
+  ) {
+    const metadata = sanitizeAuditMetadata(input.metadata ?? undefined);
+
+    return client.auditLog.create({
+      data: {
+        hospitalId: input.hospitalId,
+        branchId: input.branchId ?? undefined,
+        userId: input.userId ?? undefined,
+        action: input.action,
+        entity: input.entity,
+        entityId: input.entityId ?? undefined,
+        metadata,
       },
     });
   }

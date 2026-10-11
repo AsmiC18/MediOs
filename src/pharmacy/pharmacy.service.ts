@@ -11,7 +11,13 @@ import {
   PrescriptionStatus,
   Prisma,
 } from '@prisma/client';
+import { PharmacyDispensingBillingEnqueueService } from '../billing/pharmacy-dispensing-billing-enqueue.service';
 import { AuditService } from '../audit/audit.service';
+import {
+  applyBranchScope,
+  assertBranchAccess,
+  resolveCreateBranchId,
+} from '../common/auth/branch-scope.util';
 import { PrismaService } from '../common/prisma/prisma.service';
 import {
   BatchQueryDto,
@@ -31,6 +37,24 @@ import {
   assertBatchNotExpired,
   findEligibleBatches,
 } from './utils/fefo.util';
+import { validateFormularyDispenseLine } from './utils/formulary-dispensing.util';
+import { resolveSubstitutionFields } from './utils/substitution.util';
+
+export type PreparedDispensingLine = {
+  prescriptionItemId: string;
+  productId: string;
+  prescribedProductId: string | null;
+  substitutionReason: string | null;
+  isSubstitution: boolean;
+  allocations: { batchId: string; quantity: number; unitPrice: number }[];
+};
+
+export type PreparedDispensing = {
+  patientId: string;
+  prescriptionId: string;
+  branchId: string | null;
+  resolvedLines: PreparedDispensingLine[];
+};
 
 type AuthenticatedUser = {
   sub: string;
@@ -83,6 +107,7 @@ export class PharmacyService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly pharmacyDispensingBillingEnqueue?: PharmacyDispensingBillingEnqueueService,
   ) {}
 
   private async validateBranch(user: AuthenticatedUser, branchId: string) {
@@ -114,6 +139,8 @@ export class PharmacyService {
       throw new BadRequestException('Patient record is not active');
     }
 
+    assertBranchAccess(user, patient.branchId);
+
     return patient;
   }
 
@@ -125,6 +152,8 @@ export class PharmacyService {
     if (!product || product.hospitalId !== user.hospitalId) {
       throw new NotFoundException('Pharmacy product not found');
     }
+
+    assertBranchAccess(user, product.branchId);
 
     return product;
   }
@@ -139,6 +168,8 @@ export class PharmacyService {
       throw new NotFoundException('Pharmacy batch not found');
     }
 
+    assertBranchAccess(user, batch.branchId);
+
     return batch;
   }
 
@@ -151,6 +182,8 @@ export class PharmacyService {
     if (!dispensing || dispensing.hospitalId !== user.hospitalId) {
       throw new NotFoundException('Pharmacy dispensing not found');
     }
+
+    assertBranchAccess(user, dispensing.branchId);
 
     return dispensing;
   }
@@ -201,8 +234,10 @@ export class PharmacyService {
   }
 
   async createProduct(user: AuthenticatedUser, dto: CreateProductDto) {
-    if (dto.branchId) {
-      await this.validateBranch(user, dto.branchId);
+    const branchId = resolveCreateBranchId(user, dto.branchId);
+
+    if (branchId) {
+      await this.validateBranch(user, branchId);
     }
 
     let product;
@@ -211,7 +246,7 @@ export class PharmacyService {
       product = await this.prisma.pharmacyProduct.create({
         data: {
           hospitalId: user.hospitalId,
-          branchId: dto.branchId ?? null,
+          branchId: branchId ?? null,
           name: dto.name.trim(),
           genericName: dto.genericName?.trim(),
           strength: dto.strength?.trim(),
@@ -254,6 +289,10 @@ export class PharmacyService {
       where.isActive = query.isActive;
     }
 
+    if (user.branchId == null && query.branchId) {
+      await this.validateBranch(user, query.branchId);
+    }
+
     if (query.branchId) {
       where.branchId = query.branchId;
     }
@@ -263,7 +302,7 @@ export class PharmacyService {
     }
 
     return this.prisma.pharmacyProduct.findMany({
-      where,
+      where: applyBranchScope(user, where),
       orderBy: { name: 'asc' },
     });
   }
@@ -414,12 +453,16 @@ export class PharmacyService {
       where.productId = query.productId;
     }
 
+    if (user.branchId == null && query.branchId) {
+      await this.validateBranch(user, query.branchId);
+    }
+
     if (query.branchId) {
       where.branchId = query.branchId;
     }
 
     return this.prisma.pharmacyBatch.findMany({
-      where,
+      where: applyBranchScope(user, where),
       include: { product: { select: { id: true, name: true, unit: true, isActive: true } } },
       orderBy: [{ expiryDate: 'asc' }, { batchNumber: 'asc' }],
     });
@@ -522,7 +565,10 @@ export class PharmacyService {
     return updated;
   }
 
-  async createDispensing(user: AuthenticatedUser, dto: CreateDispensingDto) {
+  async prepareDispensing(
+    user: AuthenticatedUser,
+    dto: CreateDispensingDto,
+  ): Promise<PreparedDispensing> {
     await this.validatePatient(user, dto.patientId);
 
     const prescription = await this.prisma.prescription.findUnique({
@@ -535,26 +581,27 @@ export class PharmacyService {
     }
 
     if (prescription.patientId !== dto.patientId) {
-      throw new BadRequestException('Prescription does not belong to the specified patient');
+      throw new BadRequestException(
+        'Prescription does not belong to the specified patient',
+      );
     }
 
     if (prescription.status === PrescriptionStatus.CANCELLED) {
-      throw new BadRequestException('Cannot dispense from a cancelled prescription');
+      throw new BadRequestException(
+        'Cannot dispense from a cancelled prescription',
+      );
     }
 
-    let branchId = dto.branchId ?? prescription.encounter.branchId ?? user.branchId ?? null;
+    assertBranchAccess(user, prescription.encounter.branchId);
+
+    let branchId =
+      dto.branchId ?? prescription.encounter.branchId ?? user.branchId ?? null;
     if (dto.branchId) {
       await this.validateBranch(user, dto.branchId);
       branchId = dto.branchId;
     }
 
-    type ResolvedLine = {
-      prescriptionItemId: string;
-      productId: string;
-      allocations: { batchId: string; quantity: number; unitPrice: number }[];
-    };
-
-    const resolvedLines: ResolvedLine[] = [];
+    const resolvedLines: PreparedDispensingLine[] = [];
 
     for (const item of dto.items) {
       const prescriptionItem = prescription.items.find(
@@ -562,7 +609,9 @@ export class PharmacyService {
       );
 
       if (!prescriptionItem) {
-        throw new BadRequestException('Prescription item does not belong to the prescription');
+        throw new BadRequestException(
+          'Prescription item does not belong to the prescription',
+        );
       }
 
       if (prescriptionItem.quantity == null) {
@@ -571,11 +620,50 @@ export class PharmacyService {
         );
       }
 
-      const alreadyDispensed = await this.getDispensedQuantityForItem(item.prescriptionItemId);
+      const alreadyDispensed = await this.getDispensedQuantityForItem(
+        item.prescriptionItemId,
+      );
       if (alreadyDispensed + item.quantity > prescriptionItem.quantity) {
         throw new BadRequestException(
           'Dispensed quantity would exceed prescribed quantity',
         );
+      }
+
+      const substitution = resolveSubstitutionFields({
+        productId: item.productId,
+        prescribedProductId: item.prescribedProductId,
+        substitutionReason: item.substitutionReason,
+      });
+
+      if (prescriptionItem.clinicalDrugId) {
+        const formularyEntry =
+          await this.prisma.hospitalFormularyEntry.findUnique({
+            where: {
+              hospitalId_clinicalDrugId: {
+                hospitalId: user.hospitalId,
+                clinicalDrugId: prescriptionItem.clinicalDrugId,
+              },
+            },
+          });
+        validateFormularyDispenseLine({
+          formularyEntryActive: formularyEntry?.isActive ?? false,
+          defaultPharmacyProductId:
+            formularyEntry?.defaultPharmacyProductId ?? null,
+          dispensedProductId: item.productId,
+          prescribedProductId: substitution.prescribedProductId,
+          substitutionReason: substitution.substitutionReason,
+          isSubstitution: substitution.isSubstitution,
+        });
+      }
+
+      if (substitution.isSubstitution && substitution.prescribedProductId) {
+        const prescribedProduct = await this.findOwnedProduct(
+          user,
+          substitution.prescribedProductId,
+        );
+        if (!prescribedProduct.isActive) {
+          throw new BadRequestException('Prescribed product is inactive');
+        }
       }
 
       const product = await this.findOwnedProduct(user, item.productId);
@@ -583,18 +671,27 @@ export class PharmacyService {
         throw new BadRequestException('Product is inactive');
       }
 
+      const lineBase = {
+        prescriptionItemId: item.prescriptionItemId,
+        productId: product.id,
+        prescribedProductId: substitution.prescribedProductId,
+        substitutionReason: substitution.substitutionReason,
+        isSubstitution: substitution.isSubstitution,
+      };
+
       if (item.batchId) {
         const batch = await this.findOwnedBatch(user, item.batchId);
         if (batch.productId !== product.id) {
-          throw new BadRequestException('Batch does not belong to the specified product');
+          throw new BadRequestException(
+            'Batch does not belong to the specified product',
+          );
         }
         assertBatchNotExpired(batch);
         if (batch.quantity < item.quantity) {
           throw new ConflictException('Insufficient stock in selected batch');
         }
         resolvedLines.push({
-          prescriptionItemId: item.prescriptionItemId,
-          productId: product.id,
+          ...lineBase,
           allocations: [
             {
               batchId: batch.id,
@@ -611,87 +708,110 @@ export class PharmacyService {
         });
         const allocations = allocateFefoBatches(eligible, item.quantity);
         resolvedLines.push({
-          prescriptionItemId: item.prescriptionItemId,
-          productId: product.id,
+          ...lineBase,
           allocations,
         });
       }
     }
 
+    return {
+      patientId: dto.patientId,
+      prescriptionId: dto.prescriptionId,
+      branchId,
+      resolvedLines,
+    };
+  }
+
+  async createDispensingInTransaction(
+    tx: Prisma.TransactionClient,
+    user: AuthenticatedUser,
+    prepared: PreparedDispensing,
+  ) {
+    const { branchId, resolvedLines, patientId, prescriptionId } = prepared;
+
     const allBatchIds = resolvedLines.flatMap((line) =>
       line.allocations.map((a) => a.batchId),
     );
 
-    const dispensing = await this.prisma.$transaction(async (tx) => {
-      await lockBatchesInOrder(tx, allBatchIds);
+    await lockBatchesInOrder(tx, allBatchIds);
 
-      for (const line of resolvedLines) {
-        for (const allocation of line.allocations) {
-          const locked = await tx.pharmacyBatch.findUniqueOrThrow({
-            where: { id: allocation.batchId },
-            include: { product: true },
-          });
+    for (const line of resolvedLines) {
+      for (const allocation of line.allocations) {
+        const locked = await tx.pharmacyBatch.findUniqueOrThrow({
+          where: { id: allocation.batchId },
+          include: { product: true },
+        });
 
-          if (!locked.product.isActive) {
-            throw new BadRequestException('Product is inactive');
-          }
-
-          assertBatchNotExpired(locked);
-
-          if (locked.quantity < allocation.quantity) {
-            throw new ConflictException('Insufficient stock');
-          }
-
-          await tx.pharmacyBatch.update({
-            where: { id: locked.id },
-            data: { quantity: locked.quantity - allocation.quantity },
-          });
+        if (!locked.product.isActive) {
+          throw new BadRequestException('Product is inactive');
         }
-      }
 
-      const created = await tx.pharmacyDispensing.create({
-        data: {
-          hospitalId: user.hospitalId,
-          branchId,
-          patientId: dto.patientId,
-          prescriptionId: dto.prescriptionId,
-          createdByUserId: user.sub,
-          status: PharmacyDispensingStatus.DISPENSED,
-          dispensedAt: new Date(),
-          items: {
-            create: resolvedLines.flatMap((line) =>
-              line.allocations.map((allocation) => ({
-                prescriptionItemId: line.prescriptionItemId,
-                productId: line.productId,
-                batchId: allocation.batchId,
-                quantity: allocation.quantity,
-                unitPrice: allocation.unitPrice,
-              })),
-            ),
-          },
+        assertBatchNotExpired(locked);
+
+        if (locked.quantity < allocation.quantity) {
+          throw new ConflictException('Insufficient stock');
+        }
+
+        await tx.pharmacyBatch.update({
+          where: { id: locked.id },
+          data: { quantity: locked.quantity - allocation.quantity },
+        });
+      }
+    }
+
+    const created = await tx.pharmacyDispensing.create({
+      data: {
+        hospitalId: user.hospitalId,
+        branchId,
+        patientId,
+        prescriptionId,
+        createdByUserId: user.sub,
+        status: PharmacyDispensingStatus.DISPENSED,
+        dispensedAt: new Date(),
+        items: {
+          create: resolvedLines.flatMap((line) =>
+            line.allocations.map((allocation) => ({
+              prescriptionItemId: line.prescriptionItemId,
+              productId: line.productId,
+              prescribedProductId: line.prescribedProductId,
+              substitutionReason: line.substitutionReason,
+              substitutedByUserId: line.isSubstitution ? user.sub : null,
+              substitutedAt: line.isSubstitution ? new Date() : null,
+              batchId: allocation.batchId,
+              quantity: allocation.quantity,
+              unitPrice: allocation.unitPrice,
+            })),
+          ),
         },
-        include: dispensingInclude,
-      });
-
-      for (const line of resolvedLines) {
-        for (const allocation of line.allocations) {
-          await this.recordStockMovement(tx, {
-            hospitalId: user.hospitalId,
-            branchId,
-            productId: line.productId,
-            batchId: allocation.batchId,
-            movementType: PharmacyStockMovementType.DISPENSE,
-            quantity: allocation.quantity,
-            referenceType: 'PharmacyDispensing',
-            referenceId: created.id,
-            createdByUserId: user.sub,
-          });
-        }
-      }
-
-      return created;
+      },
+      include: dispensingInclude,
     });
 
+    for (const line of resolvedLines) {
+      for (const allocation of line.allocations) {
+        await this.recordStockMovement(tx, {
+          hospitalId: user.hospitalId,
+          branchId,
+          productId: line.productId,
+          batchId: allocation.batchId,
+          movementType: PharmacyStockMovementType.DISPENSE,
+          quantity: allocation.quantity,
+          referenceType: 'PharmacyDispensing',
+          referenceId: created.id,
+          createdByUserId: user.sub,
+        });
+      }
+    }
+
+    return created;
+  }
+
+  async finalizeDispensingAfterCreate(
+    user: AuthenticatedUser,
+    dispensing: Prisma.PharmacyDispensingGetPayload<{
+      include: typeof dispensingInclude;
+    }>,
+  ) {
     await this.auditService.log({
       action: 'PHARMACY_DISPENSING_CREATED',
       entity: 'PharmacyDispensing',
@@ -705,6 +825,36 @@ export class PharmacyService {
         itemCount: dispensing.items.length,
       },
     });
+
+    for (const dispensedItem of dispensing.items) {
+      if (dispensedItem.prescribedProductId) {
+        await this.auditService.log({
+          action: 'PHARMACY_DISPENSE_SUBSTITUTION',
+          entity: 'PharmacyDispensingItem',
+          entityId: dispensedItem.id,
+          hospitalId: user.hospitalId,
+          branchId: dispensing.branchId,
+          userId: user.sub,
+          metadata: {
+            dispensingId: dispensing.id,
+            prescriptionItemId: dispensedItem.prescriptionItemId,
+            patientId: dispensing.patientId,
+            prescribedProductId: dispensedItem.prescribedProductId,
+            dispensedProductId: dispensedItem.productId,
+            reason: dispensedItem.substitutionReason,
+          },
+        });
+      }
+    }
+
+    if (this.pharmacyDispensingBillingEnqueue) {
+      await this.pharmacyDispensingBillingEnqueue.enqueueForDispensing({
+        id: dispensing.id,
+        hospitalId: dispensing.hospitalId,
+        branchId: dispensing.branchId,
+        patientId: dispensing.patientId,
+      });
+    }
 
     await this.onDispensingCompleted(dispensing);
 
@@ -725,6 +875,16 @@ export class PharmacyService {
     });
 
     return dispensing;
+  }
+
+  async createDispensing(user: AuthenticatedUser, dto: CreateDispensingDto) {
+    const prepared = await this.prepareDispensing(user, dto);
+
+    const dispensing = await this.prisma.$transaction(async (tx) =>
+      this.createDispensingInTransaction(tx, user, prepared),
+    );
+
+    return this.finalizeDispensingAfterCreate(user, dispensing);
   }
 
   private summarizeDispensingAmount(
@@ -762,7 +922,7 @@ export class PharmacyService {
     }
 
     return this.prisma.pharmacyDispensing.findMany({
-      where,
+      where: applyBranchScope(user, where),
       include: dispensingInclude,
       orderBy: { createdAt: 'desc' },
     });

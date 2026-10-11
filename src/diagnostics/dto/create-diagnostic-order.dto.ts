@@ -3,9 +3,11 @@ import {
   ArrayMinSize,
   IsArray,
   IsEnum,
+  IsNumber,
   IsOptional,
   IsString,
   MaxLength,
+  Min,
   MinLength,
   ValidateNested,
 } from 'class-validator';
@@ -26,6 +28,12 @@ export class DiagnosticTestDto {
   @MinLength(1)
   @MaxLength(128)
   specimenType: string;
+
+  @IsNumber()
+  @IsOptional()
+  @Min(0)
+  @Type(() => Number)
+  billableUnitPrice?: number;
 }
 
 export class CreateDiagnosticOrderDto {

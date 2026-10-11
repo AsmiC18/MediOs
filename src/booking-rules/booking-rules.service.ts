@@ -4,7 +4,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
+import { assertBranchAccess } from '../common/auth/branch-scope.util';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { BOOKING_POLICY_MAX_MINUTES } from '../scheduling/scheduling-booking-policy.util';
 import { CreateBookingRuleDto } from './dto/create-booking-rule.dto';
 import { UpdateBookingRuleDto } from './dto/update-booking-rule.dto';
 
@@ -28,6 +30,20 @@ export class BookingRulesService {
     if (minDurationMinutes > maxDurationMinutes) {
       throw new BadRequestException(
         'minDurationMinutes must be less than or equal to maxDurationMinutes',
+      );
+    }
+  }
+
+  private validatePolicyMinutes(
+    field: string,
+    value: number | null | undefined,
+  ): void {
+    if (value == null) {
+      return;
+    }
+    if (value < 0 || value > BOOKING_POLICY_MAX_MINUTES) {
+      throw new BadRequestException(
+        `${field} must be between 0 and ${BOOKING_POLICY_MAX_MINUTES}`,
       );
     }
   }
@@ -57,6 +73,8 @@ export class BookingRulesService {
       throw new NotFoundException('Branch not found');
     }
 
+    assertBranchAccess(user, branch.id);
+
     return branch;
   }
 
@@ -66,6 +84,10 @@ export class BookingRulesService {
     minDurationMinutes: number;
     maxDurationMinutes: number;
     slotDurationMinutes: number;
+    minimumAdvanceMinutes: number;
+    maximumAdvanceMinutes: number | null;
+    cancellationWindowMinutes: number;
+    bufferMinutes: number;
     createdAt: Date;
     updatedAt: Date;
   }) {
@@ -75,6 +97,10 @@ export class BookingRulesService {
       minDurationMinutes: rule.minDurationMinutes,
       maxDurationMinutes: rule.maxDurationMinutes,
       slotDurationMinutes: rule.slotDurationMinutes,
+      minimumAdvanceMinutes: rule.minimumAdvanceMinutes,
+      maximumAdvanceMinutes: rule.maximumAdvanceMinutes,
+      cancellationWindowMinutes: rule.cancellationWindowMinutes,
+      bufferMinutes: rule.bufferMinutes,
       createdAt: rule.createdAt,
       updatedAt: rule.updatedAt,
     };
@@ -85,6 +111,19 @@ export class BookingRulesService {
       dto.minDurationMinutes,
       dto.maxDurationMinutes,
     );
+    this.validatePolicyMinutes(
+      'minimumAdvanceMinutes',
+      dto.minimumAdvanceMinutes ?? 0,
+    );
+    this.validatePolicyMinutes(
+      'maximumAdvanceMinutes',
+      dto.maximumAdvanceMinutes,
+    );
+    this.validatePolicyMinutes(
+      'cancellationWindowMinutes',
+      dto.cancellationWindowMinutes ?? 0,
+    );
+    this.validatePolicyMinutes('bufferMinutes', dto.bufferMinutes ?? 0);
 
     const rule = await this.prisma.bookingRule.create({
       data: {
@@ -92,6 +131,10 @@ export class BookingRulesService {
         minDurationMinutes: dto.minDurationMinutes,
         maxDurationMinutes: dto.maxDurationMinutes,
         slotDurationMinutes: dto.slotDurationMinutes,
+        minimumAdvanceMinutes: dto.minimumAdvanceMinutes ?? 0,
+        maximumAdvanceMinutes: dto.maximumAdvanceMinutes ?? null,
+        cancellationWindowMinutes: dto.cancellationWindowMinutes ?? 0,
+        bufferMinutes: dto.bufferMinutes ?? 0,
       },
     });
 
@@ -138,6 +181,24 @@ export class BookingRulesService {
 
     this.validateDurationBounds(minDurationMinutes, maxDurationMinutes);
 
+    const nextMinimumAdvance =
+      dto.minimumAdvanceMinutes ?? existing.minimumAdvanceMinutes;
+    const nextMaximumAdvance =
+      dto.maximumAdvanceMinutes !== undefined
+        ? dto.maximumAdvanceMinutes
+        : existing.maximumAdvanceMinutes;
+    const nextCancellationWindow =
+      dto.cancellationWindowMinutes ?? existing.cancellationWindowMinutes;
+    const nextBuffer = dto.bufferMinutes ?? existing.bufferMinutes;
+
+    this.validatePolicyMinutes('minimumAdvanceMinutes', nextMinimumAdvance);
+    this.validatePolicyMinutes('maximumAdvanceMinutes', nextMaximumAdvance);
+    this.validatePolicyMinutes(
+      'cancellationWindowMinutes',
+      nextCancellationWindow,
+    );
+    this.validatePolicyMinutes('bufferMinutes', nextBuffer);
+
     const rule = await this.prisma.bookingRule.update({
       where: {
         id: ruleId,
@@ -151,6 +212,18 @@ export class BookingRulesService {
         }),
         ...(dto.slotDurationMinutes !== undefined && {
           slotDurationMinutes: dto.slotDurationMinutes,
+        }),
+        ...(dto.minimumAdvanceMinutes !== undefined && {
+          minimumAdvanceMinutes: dto.minimumAdvanceMinutes,
+        }),
+        ...(dto.maximumAdvanceMinutes !== undefined && {
+          maximumAdvanceMinutes: dto.maximumAdvanceMinutes,
+        }),
+        ...(dto.cancellationWindowMinutes !== undefined && {
+          cancellationWindowMinutes: dto.cancellationWindowMinutes,
+        }),
+        ...(dto.bufferMinutes !== undefined && {
+          bufferMinutes: dto.bufferMinutes,
         }),
       },
     });

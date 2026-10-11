@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -12,7 +13,18 @@ import {
   Prisma,
 } from '@prisma/client';
 import { AuditService } from '../audit/audit.service';
+import { buildDiagnosticOrderBillingEvent } from '../billing/department/department-billing-event.util';
+import { roundMoney, toDecimal } from '../billing/utils/money.util';
+import { DepartmentBillingEnqueueService } from '../billing/department/department-billing-enqueue.service';
+import { departmentBillingJobKey } from '../billing/department/department-billing-enqueue.service';
+import { JOB_TYPES } from '../jobs/job-types.constants';
+import {
+  applyBranchScope,
+  assertBranchAccess,
+} from '../common/auth/branch-scope.util';
 import { PrismaService } from '../common/prisma/prisma.service';
+import { DomainEventOutboxService } from '../notifications/domain-event-outbox.service';
+import { buildDiagnosticOrderCompletedDomainEvent } from './diagnostic-order-completed-event.util';
 import { CreateDiagnosticOrderDto } from './dto/create-diagnostic-order.dto';
 import { DiagnosticOrderQueryDto } from './dto/diagnostic-order-query.dto';
 import { EnterResultDto } from './dto/enter-result.dto';
@@ -74,6 +86,8 @@ export class DiagnosticsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly domainEventOutboxService: DomainEventOutboxService,
+    private readonly departmentBillingEnqueue: DepartmentBillingEnqueueService,
   ) {}
 
   private async validatePatient(user: AuthenticatedUser, patientId: string) {
@@ -89,7 +103,27 @@ export class DiagnosticsService {
       throw new BadRequestException('Patient record is not active');
     }
 
+    if (patient.branchId != null) {
+      assertBranchAccess(user, patient.branchId);
+    }
+
     return patient;
+  }
+
+  private async validateBranch(user: AuthenticatedUser, branchId: string) {
+    const branch = await this.prisma.branch.findUnique({
+      where: { id: branchId },
+    });
+
+    if (!branch) {
+      throw new NotFoundException('Branch not found');
+    }
+
+    if (branch.hospitalId !== user.hospitalId) {
+      throw new ForbiddenException('Branch does not belong to your hospital');
+    }
+
+    return branch;
   }
 
   private async findOwnedEncounter(user: AuthenticatedUser, encounterId: string) {
@@ -100,6 +134,8 @@ export class DiagnosticsService {
     if (!encounter || encounter.hospitalId !== user.hospitalId) {
       throw new NotFoundException('Clinical encounter not found');
     }
+
+    assertBranchAccess(user, encounter.branchId);
 
     return encounter;
   }
@@ -113,6 +149,8 @@ export class DiagnosticsService {
     if (!order || order.hospitalId !== user.hospitalId) {
       throw new NotFoundException('Diagnostic order not found');
     }
+
+    assertBranchAccess(user, order.branchId);
 
     return order;
   }
@@ -130,6 +168,8 @@ export class DiagnosticsService {
     if (!item || item.hospitalId !== user.hospitalId) {
       throw new NotFoundException('Diagnostic order item not found');
     }
+
+    assertBranchAccess(user, item.order.branchId);
 
     return item;
   }
@@ -216,8 +256,8 @@ export class DiagnosticsService {
   }
 
   /**
-   * Future WhatsApp integration hook — call after order completion.
-   * No outbound messaging is sent today.
+   * Extension point after order completion. No outbound messaging or outbox emission here;
+   * patient notifications use the domain-event pipeline separately when configured.
    */
   private async onDiagnosticOrderCompleted(
     order: Prisma.DiagnosticOrderGetPayload<{ include: typeof orderInclude }>,
@@ -265,6 +305,11 @@ export class DiagnosticsService {
                   testCode: test.testCode.trim(),
                   testName: test.testName.trim(),
                   specimenType: test.specimenType.trim(),
+                  ...(test.billableUnitPrice != null && {
+                    billableUnitPrice: roundMoney(
+                      toDecimal(test.billableUnitPrice),
+                    ),
+                  }),
                 })),
               },
             },
@@ -335,6 +380,10 @@ export class DiagnosticsService {
       where.priority = query.priority;
     }
 
+    if (user.branchId == null && query.branchId) {
+      await this.validateBranch(user, query.branchId);
+    }
+
     if (query.branchId) {
       where.branchId = query.branchId;
     }
@@ -345,8 +394,10 @@ export class DiagnosticsService {
       where.orderedAt = { gte: start, lte: end };
     }
 
+    const scopedWhere = applyBranchScope(user, where);
+
     const orders = await this.prisma.diagnosticOrder.findMany({
-      where,
+      where: scopedWhere,
       include: orderInclude,
       orderBy: { orderedAt: 'desc' },
     });
@@ -356,6 +407,20 @@ export class DiagnosticsService {
 
   async getOrder(user: AuthenticatedUser, orderId: string) {
     const order = await this.findOwnedOrder(user, orderId);
+
+    await this.auditService.log({
+      action: 'DIAGNOSTIC_ORDER_READ',
+      entity: 'DiagnosticOrder',
+      entityId: order.id,
+      hospitalId: user.hospitalId,
+      branchId: order.branchId,
+      userId: user.sub,
+      metadata: {
+        patientId: order.patientId,
+        orderNumber: order.orderNumber,
+      },
+    });
+
     return this.formatOrder(order);
   }
 
@@ -587,28 +652,69 @@ export class DiagnosticsService {
 
     this.assertTransition(order.status, DiagnosticOrderStatus.COMPLETED);
 
-    const updated = await this.prisma.diagnosticOrder.update({
-      where: { id: order.id },
-      data: {
-        status: DiagnosticOrderStatus.COMPLETED,
-        completedAt: new Date(),
-      },
-      include: orderInclude,
-    });
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const persisted = await tx.diagnosticOrder.update({
+        where: { id: order.id },
+        data: {
+          status: DiagnosticOrderStatus.COMPLETED,
+          completedAt: new Date(),
+        },
+        include: orderInclude,
+      });
 
-    await this.auditService.log({
-      action: 'DIAGNOSTIC_ORDER_COMPLETED',
-      entity: 'DiagnosticOrder',
-      entityId: updated.id,
-      hospitalId: user.hospitalId,
-      branchId: updated.branchId,
-      userId: user.sub,
-      metadata: {
-        orderNumber: updated.orderNumber,
-        previousStatus: order.status,
-        newStatus: updated.status,
-        itemCount: updated.items.length,
-      },
+      const completedEvent = buildDiagnosticOrderCompletedDomainEvent({
+        diagnosticOrderId: persisted.id,
+        orderNumber: persisted.orderNumber,
+        patientId: persisted.patientId,
+        hospitalId: persisted.hospitalId,
+        branchId: persisted.branchId,
+        completedByUserId: user.sub,
+        itemCount: persisted.items.length,
+      });
+
+      const outbox = await this.domainEventOutboxService.createInTransaction(
+        tx,
+        completedEvent,
+      );
+
+      await this.domainEventOutboxService.enqueueDispatchInTransaction(tx, {
+        hospitalId: persisted.hospitalId,
+        branchId: persisted.branchId,
+        outboxId: outbox.id,
+      });
+
+      const billingEvent = buildDiagnosticOrderBillingEvent({
+        diagnosticOrderId: persisted.id,
+        patientId: persisted.patientId,
+        hospitalId: persisted.hospitalId,
+        branchId: persisted.branchId,
+      });
+
+      await this.departmentBillingEnqueue.enqueueInTransaction(tx, {
+        event: billingEvent,
+        jobType: JOB_TYPES.BILLING_DEPARTMENT_PROCESS,
+        jobIdempotencyKey: departmentBillingJobKey(
+          JOB_TYPES.BILLING_DEPARTMENT_PROCESS,
+          persisted.id,
+        ),
+      });
+
+      await this.auditService.logInTransaction(tx, {
+        action: 'DIAGNOSTIC_ORDER_COMPLETED',
+        entity: 'DiagnosticOrder',
+        entityId: persisted.id,
+        hospitalId: user.hospitalId,
+        branchId: persisted.branchId,
+        userId: user.sub,
+        metadata: {
+          orderNumber: persisted.orderNumber,
+          previousStatus: order.status,
+          newStatus: persisted.status,
+          itemCount: persisted.items.length,
+        },
+      });
+
+      return persisted;
     });
 
     await this.onDiagnosticOrderCompleted(updated);
@@ -650,18 +756,10 @@ export class DiagnosticsService {
     return this.formatOrder(updated);
   }
 
-  async getPatientDiagnostics(user: AuthenticatedUser, patientId: string) {
-    await this.validatePatient(user, patientId);
-
-    const orders = await this.prisma.diagnosticOrder.findMany({
-      where: {
-        hospitalId: user.hospitalId,
-        patientId,
-      },
-      include: orderInclude,
-      orderBy: { orderedAt: 'desc' },
-    });
-
+  private mapPatientDiagnosticOrders(
+    patientId: string,
+    orders: Prisma.DiagnosticOrderGetPayload<{ include: typeof orderInclude }>[],
+  ) {
     return {
       patientId,
       orders: orders.map((order) => ({
@@ -683,5 +781,69 @@ export class DiagnosticsService {
         })),
       })),
     };
+  }
+
+  async getPatientDiagnostics(user: AuthenticatedUser, patientId: string) {
+    await this.validatePatient(user, patientId);
+
+    const orders = await this.prisma.diagnosticOrder.findMany({
+      where: applyBranchScope(user, {
+        hospitalId: user.hospitalId,
+        patientId,
+      }),
+      include: orderInclude,
+      orderBy: { orderedAt: 'desc' },
+    });
+
+    await this.auditService.log({
+      action: 'DIAGNOSTIC_PATIENT_LIST_READ',
+      entity: 'Patient',
+      entityId: patientId,
+      hospitalId: user.hospitalId,
+      branchId: user.branchId ?? null,
+      userId: user.sub,
+      metadata: { orderCount: orders.length },
+    });
+
+    return this.mapPatientDiagnosticOrders(patientId, orders);
+  }
+
+  async getPatientDiagnosticsForPortal(
+    scope: { hospitalId: string; branchId: string | null },
+    patientId: string,
+  ) {
+    const patient = await this.prisma.patient.findUnique({
+      where: { id: patientId },
+    });
+    if (!patient || patient.hospitalId !== scope.hospitalId) {
+      throw new NotFoundException('Patient not found');
+    }
+    if (scope.branchId != null && patient.branchId !== scope.branchId) {
+      throw new ForbiddenException('Access to this branch is not permitted');
+    }
+    if (patient.mergedIntoPatientId) {
+      throw new BadRequestException('Patient record is not active');
+    }
+
+    const orders = await this.prisma.diagnosticOrder.findMany({
+      where: {
+        hospitalId: scope.hospitalId,
+        patientId,
+      },
+      include: orderInclude,
+      orderBy: { orderedAt: 'desc' },
+    });
+
+    await this.auditService.log({
+      action: 'PORTAL_DIAGNOSTIC_LIST_READ',
+      entity: 'Patient',
+      entityId: patientId,
+      hospitalId: scope.hospitalId,
+      branchId: scope.branchId,
+      userId: null,
+      metadata: { orderCount: orders.length, channel: 'patient_portal' },
+    });
+
+    return this.mapPatientDiagnosticOrders(patientId, orders);
   }
 }

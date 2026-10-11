@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
+import { assertBranchAccess } from '../common/auth/branch-scope.util';
 import { PrismaService } from '../common/prisma/prisma.service';
 import { CreateWorkScheduleDto } from './dto/create-work-schedule.dto';
 import { UpdateWorkScheduleDto } from './dto/update-work-schedule.dto';
@@ -63,6 +64,8 @@ export class WorkSchedulesService {
     if (!branch || branch.hospitalId !== user.hospitalId) {
       throw new NotFoundException('Branch not found');
     }
+
+    assertBranchAccess(user, branch.id);
 
     return branch;
   }

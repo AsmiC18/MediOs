@@ -15,4 +15,24 @@ export class UpdateBookingRuleDto {
   @Min(1)
   @IsOptional()
   slotDurationMinutes?: number;
+
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  minimumAdvanceMinutes?: number;
+
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  maximumAdvanceMinutes?: number | null;
+
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  cancellationWindowMinutes?: number;
+
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  bufferMinutes?: number;
 }

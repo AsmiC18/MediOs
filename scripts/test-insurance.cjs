@@ -1,4 +1,7 @@
 const bcrypt = require('bcrypt');
+const { loginBody } = require('./lib/login-body.cjs');
+const { ensureAdminPhase1Permissions } = require('./lib/ensure-admin-permissions.cjs');
+const { testPhone } = require('./lib/test-phone.cjs');
 const path = require('path');
 
 const { PrismaClient } = require(path.join(__dirname, '..', 'node_modules', '@prisma/client'));
@@ -38,7 +41,7 @@ async function request(method, p, { token, body, headers } = {}) {
 }
 
 async function createPatient(token) {
-  const phone = `${Date.now()}${Math.floor(Math.random() * 9)}`.slice(-10);
+  const phone = testPhone('9');
   const res = await request('POST', '/patients', {
     token,
     body: {
@@ -73,7 +76,7 @@ async function main() {
   const prisma = new PrismaClient();
 
   const login = await request('POST', '/auth/login', {
-    body: { email: 'admin@test.com', password: 'MediOS@12345' },
+    body: loginBody('admin@test.com'),
   });
   const token = login.body?.accessToken;
   const hospitalId = login.body?.user?.hospitalId;
@@ -81,6 +84,8 @@ async function main() {
     fail('login');
     process.exit(1);
   }
+  await ensureAdminPhase1Permissions(prisma, login.body.user.roleId);
+
   pass('login');
 
   for (const perm of ['insurance:read', 'insurance:manage']) {
@@ -353,7 +358,7 @@ async function main() {
     },
   });
   const limitedLogin = await request('POST', '/auth/login', {
-    body: { email: limitedUser.email, password: 'MediOS@12345' },
+    body: loginBody(limitedUser.email),
   });
   const permDenied = await request('GET', '/insurance/providers', {
     token: limitedLogin.body?.accessToken,

@@ -9,9 +9,13 @@ import {
   RejectPreAuthorizationDto,
 } from './dto/preauth.dto';
 import { InsuranceService } from './insurance.service';
+import { FeatureGuard } from '../plans/feature.guard';
+import { RequireFeature } from '../plans/require-feature.decorator';
+import { FeatureKey } from '../plans/feature-keys';
 
 @Controller('insurance/pre-authorizations')
-@UseGuards(JwtAuthGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard, FeatureGuard)
+@RequireFeature(FeatureKey.INSURANCE)
 export class InsurancePreauthController {
   constructor(private readonly insuranceService: InsuranceService) {}
 
