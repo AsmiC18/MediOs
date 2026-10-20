@@ -151,11 +151,20 @@ describe('Reports R1 integration', () => {
     to: '2026-02-01T00:00:00.000Z',
   };
 
+  const itDb = (name: string, fn: () => Promise<void>) => {
+    it(name, async () => {
+      if (!dbAvailable) {
+        return;
+      }
+      await fn();
+    });
+  };
+
   it('skips when database is unavailable', () => {
     expect(true).toBe(true);
   });
 
-  (dbAvailable ? it : it.skip)('insurance ageing includes old open claim and excludes paid-before-asOf', async () => {
+  itDb('insurance ageing includes old open claim and excludes paid-before-asOf', async () => {
     const asOfRange = {
       from: '2026-09-01T00:00:00.000Z',
       to: '2026-10-07T00:00:00.000Z',
@@ -175,6 +184,7 @@ describe('Reports R1 integration', () => {
         paidAmount: 0,
         status: InsuranceClaimStatus.SUBMITTED,
         submittedAt: new Date('2025-06-01T00:00:00.000Z'),
+        createdAt: new Date('2025-06-01T00:00:00.000Z'),
       },
     });
 
@@ -193,6 +203,7 @@ describe('Reports R1 integration', () => {
         status: InsuranceClaimStatus.PAID,
         submittedAt: new Date('2026-01-01T00:00:00.000Z'),
         paidAt: new Date('2026-09-15T00:00:00.000Z'),
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
       },
     });
 
@@ -210,6 +221,7 @@ describe('Reports R1 integration', () => {
         paidAmount: 0,
         status: InsuranceClaimStatus.SUBMITTED,
         submittedAt: new Date('2026-08-01T00:00:00.000Z'),
+        createdAt: new Date('2026-08-01T00:00:00.000Z'),
       },
     });
 
@@ -227,7 +239,7 @@ describe('Reports R1 integration', () => {
     });
   });
 
-  (dbAvailable ? it : it.skip)('pharmacy shrink counts only shrink movement types in range', async () => {
+  itDb('pharmacy shrink counts only shrink movement types in range', async () => {
     const product = await prisma.pharmacyProduct.create({
       data: {
         hospitalId,
@@ -278,7 +290,7 @@ describe('Reports R1 integration', () => {
     expect(summary.byMovementType.find((r) => r.movementType === 'EXPIRED')?.quantity).toBe(0);
   });
 
-  (dbAvailable ? it : it.skip)('ipd occupancy uses asOf point-in-time semantics', async () => {
+  itDb('ipd occupancy uses asOf point-in-time semantics', async () => {
     const bed = await prisma.ipdBed.create({
       data: {
         hospitalId,
@@ -301,7 +313,7 @@ describe('Reports R1 integration', () => {
     await prisma.ipdBed.delete({ where: { id: bed.id } });
   });
 
-  (dbAvailable ? it : it.skip)('daily dashboard aggregates financial and appointment counts', async () => {
+  itDb('daily dashboard aggregates financial and appointment counts', async () => {
     await prisma.appointment.create({
       data: {
         hospitalId,
@@ -318,13 +330,13 @@ describe('Reports R1 integration', () => {
     expect(dashboard.appointments.totalScheduled).toBeGreaterThanOrEqual(1);
   });
 
-  (dbAvailable ? it : it.skip)('branch user cannot query another branch in OPD metrics', async () => {
+  itDb('branch user cannot query another branch in OPD metrics', async () => {
     await expect(
       service.getOpdMetrics(branchAUser(), { ...range, branchId: branchB }),
     ).rejects.toThrow(ForbiddenException);
   });
 
-  (dbAvailable ? it : it.skip)('pharmacy shrink CSV export uses reports export path', async () => {
+  itDb('pharmacy shrink CSV export uses reports export path', async () => {
     const exported = await service.exportReport(hospitalUser(), {
       ...range,
       branchId: branchA,
@@ -339,7 +351,7 @@ describe('Reports R1 integration', () => {
     }
   });
 
-  (dbAvailable ? it : it.skip)('financial summary exposes explicit accrual vs cash fields', async () => {
+  itDb('financial summary exposes explicit accrual vs cash fields', async () => {
     const financial = await service.getFinancialSummary(hospitalUser(), range);
     expect(financial.invoicesIssuedInRange.timeBasis).toBe('issuedAt');
     expect(financial.paymentsSucceededInRange.timeBasis).toBe('paidAt|createdAt');

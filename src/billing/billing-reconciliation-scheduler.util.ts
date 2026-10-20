@@ -149,28 +149,132 @@ function jobToHistoryItem(
   };
 }
 
+/** Entity id segment from `jobType:entityId` or `jobType:entityId:generation` keys. */
+export function parseReconcileEntityIdFromJobKey(
+  idempotencyKey: string,
+  jobType: string,
+): string | null {
+  const head = `${jobType}:`;
+  if (!idempotencyKey.startsWith(head)) {
+    return null;
+  }
+  const rest = idempotencyKey.slice(head.length);
+  if (rest.length === 0) {
+    return null;
+  }
+  const lastColon = rest.lastIndexOf(':');
+  if (lastColon === -1) {
+    return rest;
+  }
+  const suffix = rest.slice(lastColon + 1);
+  if (/^\d+$/.test(suffix)) {
+    return rest.slice(0, lastColon);
+  }
+  return rest;
+}
+
+function emptyHistoryMap(ids: readonly string[]): Map<string, ReconciliationJobHistoryItem[]> {
+  const map = new Map<string, ReconciliationJobHistoryItem[]>();
+  for (const id of ids) {
+    map.set(id, []);
+  }
+  return map;
+}
+
+function groupReconcileJobHistory(
+  jobs: Job[],
+  jobType: string,
+  targetIds: Set<string>,
+  parseGenerationForEntity: (key: string, entityId: string) => number | null,
+): Map<string, ReconciliationJobHistoryItem[]> {
+  const map = emptyHistoryMap([...targetIds]);
+  for (const job of jobs) {
+    const entityId = parseReconcileEntityIdFromJobKey(job.idempotencyKey, jobType);
+    if (!entityId || !targetIds.has(entityId)) {
+      continue;
+    }
+    const parse = (key: string) => parseGenerationForEntity(key, entityId);
+    const item = jobToHistoryItem(job, parse);
+    if (item) {
+      map.get(entityId)!.push(item);
+    }
+  }
+  return map;
+}
+
+/** One query per hospital for payment reconcile history (replaces per-payment N+1). */
+export async function loadPaymentReconcileJobHistoriesByPaymentId(
+  transaction: Prisma.TransactionClient,
+  hospitalId: string,
+  paymentIds: readonly string[],
+): Promise<Map<string, ReconciliationJobHistoryItem[]>> {
+  const uniqueIds = [...new Set(paymentIds)];
+  const map = emptyHistoryMap(uniqueIds);
+  if (uniqueIds.length === 0) {
+    return map;
+  }
+
+  const jobs = await transaction.job.findMany({
+    where: {
+      hospitalId,
+      type: JOB_TYPES.BILLING_PAYMENT_RECONCILE,
+      idempotencyKey: {
+        startsWith: `${JOB_TYPES.BILLING_PAYMENT_RECONCILE}:`,
+      },
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  return groupReconcileJobHistory(
+    jobs,
+    JOB_TYPES.BILLING_PAYMENT_RECONCILE,
+    new Set(uniqueIds),
+    parsePaymentReconcileGeneration,
+  );
+}
+
+/** One query per hospital for refund reconcile history (replaces per-refund N+1). */
+export async function loadRefundReconcileJobHistoriesByRefundId(
+  transaction: Prisma.TransactionClient,
+  hospitalId: string,
+  refundIds: readonly string[],
+): Promise<Map<string, ReconciliationJobHistoryItem[]>> {
+  const uniqueIds = [...new Set(refundIds)];
+  const map = emptyHistoryMap(uniqueIds);
+  if (uniqueIds.length === 0) {
+    return map;
+  }
+
+  const jobs = await transaction.job.findMany({
+    where: {
+      hospitalId,
+      type: JOB_TYPES.BILLING_REFUND_RECONCILE,
+      idempotencyKey: {
+        startsWith: `${JOB_TYPES.BILLING_REFUND_RECONCILE}:`,
+      },
+    },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  return groupReconcileJobHistory(
+    jobs,
+    JOB_TYPES.BILLING_REFUND_RECONCILE,
+    new Set(uniqueIds),
+    parseRefundReconcileGeneration,
+  );
+}
+
 export async function loadPaymentReconcileJobHistory(
   transaction: Prisma.TransactionClient,
   hospitalId: string,
   paymentId: string,
 ): Promise<ReconciliationJobHistoryItem[]> {
-  const prefix = paymentReconcileJobKeyPrefix(paymentId);
-  const jobs = await transaction.job.findMany({
-    where: {
-      hospitalId,
-      type: JOB_TYPES.BILLING_PAYMENT_RECONCILE,
-      OR: [
-        { idempotencyKey: prefix },
-        { idempotencyKey: { startsWith: `${prefix}:` } },
-      ],
-    },
-    orderBy: { createdAt: 'asc' },
-  });
-
-  const parse = (key: string) => parsePaymentReconcileGeneration(key, paymentId);
-  return jobs
-    .map((job) => jobToHistoryItem(job, parse))
-    .filter((row): row is ReconciliationJobHistoryItem => row !== null);
+  const map = await loadPaymentReconcileJobHistoriesByPaymentId(
+    transaction,
+    hospitalId,
+    [paymentId],
+  );
+  return map.get(paymentId) ?? [];
 }
 
 export async function loadRefundReconcileJobHistory(
@@ -178,35 +282,27 @@ export async function loadRefundReconcileJobHistory(
   hospitalId: string,
   refundId: string,
 ): Promise<ReconciliationJobHistoryItem[]> {
-  const prefix = refundReconcileJobKeyPrefix(refundId);
-  const jobs = await transaction.job.findMany({
-    where: {
-      hospitalId,
-      type: JOB_TYPES.BILLING_REFUND_RECONCILE,
-      OR: [
-        { idempotencyKey: prefix },
-        { idempotencyKey: { startsWith: `${prefix}:` } },
-      ],
-    },
-    orderBy: { createdAt: 'asc' },
-  });
-
-  const parse = (key: string) => parseRefundReconcileGeneration(key, refundId);
-  return jobs
-    .map((job) => jobToHistoryItem(job, parse))
-    .filter((row): row is ReconciliationJobHistoryItem => row !== null);
+  const map = await loadRefundReconcileJobHistoriesByRefundId(
+    transaction,
+    hospitalId,
+    [refundId],
+  );
+  return map.get(refundId) ?? [];
 }
 
 export async function tryEnqueuePaymentReconcileIfEligible(
   context: SchedulerExecutionContext,
   hospitalId: string,
   paymentId: string,
+  preloadedHistory?: ReconciliationJobHistoryItem[],
 ): Promise<boolean> {
-  const history = await loadPaymentReconcileJobHistory(
-    context.transaction,
-    hospitalId,
-    paymentId,
-  );
+  const history =
+    preloadedHistory ??
+    (await loadPaymentReconcileJobHistory(
+      context.transaction,
+      hospitalId,
+      paymentId,
+    ));
   const nextGeneration = decideNextReconciliationGeneration(
     history,
     context.tickAt,
@@ -233,12 +329,15 @@ export async function tryEnqueueRefundReconcileIfEligible(
   context: SchedulerExecutionContext,
   hospitalId: string,
   refundId: string,
+  preloadedHistory?: ReconciliationJobHistoryItem[],
 ): Promise<boolean> {
-  const history = await loadRefundReconcileJobHistory(
-    context.transaction,
-    hospitalId,
-    refundId,
-  );
+  const history =
+    preloadedHistory ??
+    (await loadRefundReconcileJobHistory(
+      context.transaction,
+      hospitalId,
+      refundId,
+    ));
   const nextGeneration = decideNextReconciliationGeneration(
     history,
     context.tickAt,

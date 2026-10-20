@@ -242,7 +242,7 @@ describe('Notification dispatch H3 WhatsApp channel boundary', () => {
         payload: {
           emailTo: 'patient@example.com',
           emailSubject: 'Test',
-          emailBodyText: 'Body',
+          emailBody: 'Body',
         },
         idempotencyKey: `notification:email:${emailOutbox.id}`,
         status: NotificationStatus.PENDING,

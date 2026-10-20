@@ -1,10 +1,13 @@
 import { validateAbdmRealModeCredentialsFromEnv } from './abdm-production-config.util';
 import { validateProductionConfig } from './validate-production-config';
 
+const VALID_FIELD_ENCRYPTION_KEY_HEX = 'b'.repeat(64);
+
 const BASE_PRODUCTION_ENV: Record<string, string | undefined> = {
   NODE_ENV: 'production',
   JWT_SECRET: 'a-very-long-production-jwt-secret-value-123456',
   CORS_ORIGINS: 'https://app.example.com',
+  FIELD_ENCRYPTION_KEY: VALID_FIELD_ENCRYPTION_KEY_HEX,
   ABDM_CALLBACK_SECRET: 'abdm-callback-secret-value',
   ABDM_MOCK_MODE: 'false',
   RAZORPAY_MOCK_MODE: 'false',
@@ -18,7 +21,14 @@ const BASE_PRODUCTION_ENV: Record<string, string | undefined> = {
 
 function withEnv(overrides: Record<string, string | undefined>): void {
   for (const key of Object.keys(process.env)) {
-    if (key.startsWith('ABDM_') || key === 'NODE_ENV' || key === 'JWT_SECRET' || key === 'CORS_ORIGINS' || key.startsWith('RAZORPAY_')) {
+    if (
+      key.startsWith('ABDM_') ||
+      key === 'NODE_ENV' ||
+      key === 'JWT_SECRET' ||
+      key === 'CORS_ORIGINS' ||
+      key === 'FIELD_ENCRYPTION_KEY' ||
+      key.startsWith('RAZORPAY_')
+    ) {
       delete process.env[key];
     }
   }
@@ -85,6 +95,18 @@ describe('validateProductionConfig (ABDM)', () => {
     process.env.NODE_ENV = 'development';
     delete process.env.ABDM_SANDBOX_CLIENT_ID;
     expect(() => validateProductionConfig()).not.toThrow();
+  });
+
+  it('fails in production when FIELD_ENCRYPTION_KEY is missing', () => {
+    withEnv({ FIELD_ENCRYPTION_KEY: '' });
+    expect(() => validateProductionConfig()).toThrow(
+      /FIELD_ENCRYPTION_KEY is required in production/,
+    );
+  });
+
+  it('fails in production when FIELD_ENCRYPTION_KEY is invalid', () => {
+    withEnv({ FIELD_ENCRYPTION_KEY: 'invalid-key-material' });
+    expect(() => validateProductionConfig()).toThrow(/must decode to 32 bytes/);
   });
 });
 

@@ -15,29 +15,34 @@ describe('PrivacyRetentionSchedulerTask', () => {
 
     await task.run({
       tickAt: new Date('2026-10-05T12:00:00Z'),
-      transaction: {
-        hospital: { findMany: jest.fn() },
-      },
+      hospitalId: 'h1',
+      transaction: {} as never,
       jobService: { enqueueWithClient },
-    } as never);
+      windowKey: 'w',
+    });
 
     expect(enqueueWithClient).not.toHaveBeenCalled();
   });
 
-  it('enqueues one purge job per hospital per UTC day', async () => {
+  it('enqueues one purge job for the scoped hospital per UTC day', async () => {
     process.env.PRIVACY_RETENTION_ENABLED = 'true';
     const enqueueWithClient = jest.fn();
     const task = new PrivacyRetentionSchedulerTask();
 
     await task.run({
       tickAt: new Date('2026-10-05T12:34:00Z'),
-      transaction: {
-        hospital: {
-          findMany: jest.fn().mockResolvedValue([{ id: 'h1' }, { id: 'h2' }]),
-        },
-      },
+      hospitalId: 'h1',
+      transaction: {} as never,
       jobService: { enqueueWithClient },
-    } as never);
+      windowKey: 'w',
+    });
+    await task.run({
+      tickAt: new Date('2026-10-05T12:34:00Z'),
+      hospitalId: 'h2',
+      transaction: {} as never,
+      jobService: { enqueueWithClient },
+      windowKey: 'w',
+    });
 
     expect(enqueueWithClient).toHaveBeenCalledTimes(2);
     expect(enqueueWithClient.mock.calls[0][1]).toMatchObject({

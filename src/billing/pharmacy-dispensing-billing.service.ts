@@ -19,7 +19,13 @@ import {
   pharmacyDispensingItemSourceKey,
 } from './pharmacy-dispensing-billing-event.util';
 import {
+  buildPharmacyDispensingGstLineItem,
+  BillingCatalogueCandidate,
+  selectBillingCatalogueForPharmacyDispensing,
+} from './utils/pharmacy-dispensing-catalogue.util';
+import {
   computeGstInvoice,
+  GstItemInput,
   hasTaxedItems,
   resolveSupplyType,
   TaxedLineHsnSacError,
@@ -73,6 +79,86 @@ export class PharmacyDispensingBillingService {
     }
 
     return `INV-${String(sequence).padStart(6, '0')}`;
+  }
+
+  private async buildDispensingLineItems(
+    hospitalId: string,
+    dispensing: {
+      branchId: string | null;
+      items: Array<{
+        id: string;
+        productId: string;
+        quantity: number;
+        unitPrice: Prisma.Decimal;
+        product: { name: string };
+      }>;
+    },
+  ): Promise<Array<GstItemInput & { sourceKey: string }>> {
+    const productIds = [...new Set(dispensing.items.map((item) => item.productId))];
+
+    const catalogueRows =
+      productIds.length === 0
+        ? []
+        : await this.prisma.billingCatalogueItem.findMany({
+            where: {
+              hospitalId,
+              isActive: true,
+              pharmacyProductId: { in: productIds },
+            },
+            select: {
+              id: true,
+              code: true,
+              branchId: true,
+              gstRate: true,
+              hsnSac: true,
+              pharmacyProductId: true,
+            },
+          });
+
+    const cataloguesByProduct = new Map<string, BillingCatalogueCandidate[]>();
+    for (const row of catalogueRows) {
+      if (!row.pharmacyProductId) {
+        continue;
+      }
+      const candidate: BillingCatalogueCandidate = {
+        id: row.id,
+        code: row.code,
+        branchId: row.branchId,
+        gstRate: Number(row.gstRate),
+        hsnSac: row.hsnSac,
+      };
+      const list = cataloguesByProduct.get(row.pharmacyProductId) ?? [];
+      list.push(candidate);
+      cataloguesByProduct.set(row.pharmacyProductId, list);
+    }
+
+    return dispensing.items.map((item, index) => {
+      const candidates = cataloguesByProduct.get(item.productId) ?? [];
+      const selection = selectBillingCatalogueForPharmacyDispensing(
+        candidates,
+        dispensing.branchId,
+      );
+
+      if (selection.kind === 'ambiguous') {
+        throw new JobPermanentFailureError(selection.message);
+      }
+
+      const catalogue =
+        selection.kind === 'match' ? selection.catalogue : null;
+
+      const gstLine = buildPharmacyDispensingGstLineItem({
+        productName: item.product.name,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice.toNumber(),
+        sortOrder: index,
+        catalogue,
+      });
+
+      return {
+        ...gstLine,
+        sourceKey: pharmacyDispensingItemSourceKey(item.id),
+      };
+    });
   }
 
   async processOutboxEvent(
@@ -144,14 +230,10 @@ export class PharmacyDispensingBillingService {
       return { outcome: 'already_processed', invoiceId: existingAny.invoiceId };
     }
 
-    const lineItems = dispensing.items.map((item, index) => ({
-      description: `Pharmacy: ${item.product.name}`,
-      quantity: item.quantity,
-      unitPrice: item.unitPrice.toNumber(),
-      gstRate: 0,
-      sortOrder: index,
-      sourceKey: pharmacyDispensingItemSourceKey(item.id),
-    }));
+    const lineItems = await this.buildDispensingLineItems(
+      hospitalId,
+      dispensing,
+    );
 
     const hospital = await this.prisma.hospital.findUnique({
       where: { id: hospitalId },

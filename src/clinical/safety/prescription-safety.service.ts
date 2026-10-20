@@ -112,6 +112,25 @@ export class PrescriptionSafetyService {
       });
     }
 
+    if (
+      interactionResult.status === InteractionAdapterStatus.UNAVAILABLE &&
+      policy.interactionWhenUnavailable ===
+        InteractionWhenUnavailable.ALLOW_WITH_WARNING
+    ) {
+      findings.push({
+        findingKey: buildFindingKey(
+          PrescriptionSafetyFindingType.INTERACTION,
+          'UNAVAILABLE_WARNING',
+        ),
+        findingType: PrescriptionSafetyFindingType.INTERACTION,
+        severity: PrescriptionSafetySeverity.WARNING,
+        summary:
+          'Automated drug-interaction checking was unavailable; verify interactions manually before dispensing',
+        detailJson: { adapterStatus: interactionResult.status },
+        source: PrescriptionSafetyFindingSource.ADAPTER,
+      });
+    }
+
     if (interactionResult.status === InteractionAdapterStatus.ERROR) {
       findings.push({
         findingKey: buildFindingKey(

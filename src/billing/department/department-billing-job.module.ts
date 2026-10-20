@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../../audit/audit.module';
 import { CommonModule } from '../../common/common.module';
+import { JobModule } from '../../jobs/job.module';
 import { NotificationsModule } from '../../notifications/notifications.module';
 import { DepartmentBillingEnqueueService } from './department-billing-enqueue.service';
 import { DepartmentBillingJobHandler } from './department-billing.job-handler';
@@ -8,7 +9,7 @@ import { DepartmentBillingProcessService } from './department-billing-process.se
 import { DraftLineInvoiceBillingService } from './draft-line-invoice-billing.service';
 
 @Module({
-  imports: [CommonModule, AuditModule, NotificationsModule],
+  imports: [CommonModule, AuditModule, NotificationsModule, JobModule],
   providers: [
     DraftLineInvoiceBillingService,
     DepartmentBillingProcessService,

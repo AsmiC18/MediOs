@@ -9,6 +9,7 @@ import { formatUtcDayWindow } from './scheduler-window.util';
 export class PatientAtRiskSchedulerTask implements SchedulerTask {
   readonly name = 'patient-at-risk-evaluate';
   readonly requiresTestHospitalId = false;
+  readonly usesPerHospitalTransactions = true;
 
   async run(context: SchedulerExecutionContext): Promise<void> {
     const config = loadJobSchedulerConfig();
@@ -16,21 +17,21 @@ export class PatientAtRiskSchedulerTask implements SchedulerTask {
       return;
     }
 
-    const windowKey = formatUtcDayWindow(context.tickAt);
-    const hospitals = await context.transaction.hospital.findMany({
-      select: { id: true },
-      orderBy: { id: 'asc' },
-    });
-
-    for (const hospital of hospitals) {
-      await context.jobService.enqueueWithClient(context.transaction, {
-        hospitalId: hospital.id,
-        branchId: null,
-        type: JOB_TYPES.PATIENT_AT_RISK_EVALUATE,
-        idempotencyKey: `${JOB_TYPES.PATIENT_AT_RISK_EVALUATE}:${hospital.id}:${windowKey}`,
-        payload: { window: windowKey },
-        maxAttempts: 5,
-      });
+    const hospitalId = context.hospitalId;
+    if (!hospitalId) {
+      throw new Error(
+        'patient-at-risk-evaluate requires hospitalId in scheduler context',
+      );
     }
+
+    const windowKey = formatUtcDayWindow(context.tickAt);
+    await context.jobService.enqueueWithClient(context.transaction, {
+      hospitalId,
+      branchId: null,
+      type: JOB_TYPES.PATIENT_AT_RISK_EVALUATE,
+      idempotencyKey: `${JOB_TYPES.PATIENT_AT_RISK_EVALUATE}:${hospitalId}:${windowKey}`,
+      payload: { window: windowKey },
+      maxAttempts: 5,
+    });
   }
 }

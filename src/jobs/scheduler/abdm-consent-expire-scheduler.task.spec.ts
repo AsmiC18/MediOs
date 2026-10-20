@@ -3,34 +3,34 @@ jest.mock('@nestjs/schedule', () => ({
   SchedulerRegistry: jest.fn(),
 }));
 
-import { Prisma, PrismaClient } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import { JobService } from '../job.service';
 import { JOB_TYPES } from '../job-types.constants';
 import { AbdmConsentExpireSchedulerTask } from './abdm-consent-expire-scheduler.task';
 import { formatUtcHourWindow } from './scheduler-window.util';
 
-/** Limits hospital discovery to fixture rows (avoids parallel-test DB pollution). */
-function scopeSchedulerTransactionToHospitals(
-  transaction: Prisma.TransactionClient,
-  hospitalIds: string[],
-): Prisma.TransactionClient {
-  return {
-    ...transaction,
-    hospital: {
-      ...transaction.hospital,
-      findMany: (args?: Prisma.HospitalFindManyArgs) =>
-        transaction.hospital.findMany({
-          ...args,
-          where: {
-            AND: [{ id: { in: hospitalIds } }, args?.where ?? {}],
-          },
-        }),
-    },
-  } as Prisma.TransactionClient;
-}
-
 describe('AbdmConsentExpireSchedulerTask', () => {
   const prisma = new PrismaClient();
+
+  async function runTaskForHospitals(
+    task: AbdmConsentExpireSchedulerTask,
+    jobService: JobService,
+    tickAt: Date,
+    windowKey: string,
+    hospitalIds: string[],
+  ): Promise<void> {
+    for (const hospitalId of hospitalIds) {
+      await prisma.$transaction(async (transaction) => {
+        await task.run({
+          windowKey,
+          tickAt,
+          hospitalId,
+          transaction,
+          jobService,
+        });
+      });
+    }
+  }
   let dbAvailable = false;
   let hospitalAId: string;
   let hospitalBId: string;
@@ -84,17 +84,10 @@ describe('AbdmConsentExpireSchedulerTask', () => {
     const tickAt = new Date('2026-10-04T18:15:00Z');
     const windowKey = formatUtcHourWindow(tickAt);
 
-    await prisma.$transaction(async (transaction) => {
-      await task.run({
-        windowKey,
-        tickAt,
-        transaction: scopeSchedulerTransactionToHospitals(transaction, [
-          hospitalAId,
-          hospitalBId,
-        ]),
-        jobService,
-      });
-    });
+    await runTaskForHospitals(task, jobService, tickAt, windowKey, [
+      hospitalAId,
+      hospitalBId,
+    ]);
 
     const jobs = await prisma.job.findMany({
       where: {
@@ -126,28 +119,20 @@ describe('AbdmConsentExpireSchedulerTask', () => {
     const windowKey = formatUtcHourWindow(tickAt);
 
     const scopedHospitalIds = [hospitalAId, hospitalBId];
-    await prisma.$transaction(async (transaction) => {
-      await task.run({
-        windowKey,
-        tickAt,
-        transaction: scopeSchedulerTransactionToHospitals(
-          transaction,
-          scopedHospitalIds,
-        ),
-        jobService,
-      });
-    });
-    await prisma.$transaction(async (transaction) => {
-      await task.run({
-        windowKey,
-        tickAt,
-        transaction: scopeSchedulerTransactionToHospitals(
-          transaction,
-          scopedHospitalIds,
-        ),
-        jobService,
-      });
-    });
+    await runTaskForHospitals(
+      task,
+      jobService,
+      tickAt,
+      windowKey,
+      scopedHospitalIds,
+    );
+    await runTaskForHospitals(
+      task,
+      jobService,
+      tickAt,
+      windowKey,
+      scopedHospitalIds,
+    );
 
     const jobs = await prisma.job.findMany({
       where: {

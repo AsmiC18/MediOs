@@ -19,6 +19,67 @@ export interface EmailProviderAdapter {
 
 export const EMAIL_PROVIDER_ADAPTER = Symbol('EMAIL_PROVIDER_ADAPTER');
 
+function extractNestedOutboxData(
+  payload: Record<string, unknown> | null,
+): Record<string, unknown> | null {
+  if (!payload) {
+    return null;
+  }
+  const data = payload.data;
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    return data as Record<string, unknown>;
+  }
+  return null;
+}
+
+function readEmailTo(payload: Record<string, unknown> | null): string {
+  if (!payload) {
+    return '';
+  }
+  const top = payload.emailTo;
+  if (typeof top === 'string' && top.trim()) {
+    return top.trim();
+  }
+  const nested = extractNestedOutboxData(payload);
+  const fromData = nested?.emailTo;
+  if (typeof fromData === 'string' && fromData.trim()) {
+    return fromData.trim();
+  }
+  return '';
+}
+
+function readEmailSubjectField(
+  payload: Record<string, unknown> | null,
+): string | undefined {
+  if (!payload) {
+    return undefined;
+  }
+  if (typeof payload.emailSubject === 'string') {
+    return payload.emailSubject;
+  }
+  const nested = extractNestedOutboxData(payload);
+  if (nested && typeof nested.emailSubject === 'string') {
+    return nested.emailSubject;
+  }
+  return undefined;
+}
+
+function readEmailBodyField(
+  payload: Record<string, unknown> | null,
+): string | undefined {
+  if (!payload) {
+    return undefined;
+  }
+  if (typeof payload.emailBody === 'string') {
+    return payload.emailBody;
+  }
+  const nested = extractNestedOutboxData(payload);
+  if (nested && typeof nested.emailBody === 'string') {
+    return nested.emailBody;
+  }
+  return undefined;
+}
+
 @Injectable()
 export class UnconfiguredEmailProviderAdapter implements EmailProviderAdapter {
   async send(): Promise<EmailDispatchResult> {
@@ -44,8 +105,7 @@ export class EmailNotificationAdapter {
     context: { jobId: string; workerId: string },
   ): Promise<void> {
     const payload = notification.payload as Record<string, unknown> | null;
-    const to =
-      typeof payload?.emailTo === 'string' ? payload.emailTo.trim() : '';
+    const to = readEmailTo(payload);
     if (!to) {
       await this.notificationService.markFailed(
         notification.id,
@@ -55,14 +115,12 @@ export class EmailNotificationAdapter {
       return;
     }
 
+    const subjectField = readEmailSubjectField(payload);
     const subject =
-      typeof payload?.emailSubject === 'string'
-        ? payload.emailSubject
-        : notification.category;
+      subjectField !== undefined ? subjectField : notification.category;
+    const bodyField = readEmailBodyField(payload);
     const bodyText =
-      typeof payload?.emailBody === 'string'
-        ? payload.emailBody
-        : JSON.stringify(payload ?? {});
+      bodyField !== undefined ? bodyField : JSON.stringify(payload ?? {});
 
     const result = await this.emailProvider.send({
       to,

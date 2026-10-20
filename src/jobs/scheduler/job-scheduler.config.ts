@@ -1,6 +1,18 @@
 export type JobSchedulerConfig = {
   enabled: boolean;
   intervalMs: number;
+  /**
+   * Wall-clock limit for leader orchestration (session lock held on a dedicated connection).
+   * Does not use a long-lived Prisma interactive transaction.
+   */
+  tickTransactionTimeoutMs: number;
+  /** Per-task interactive transaction timeout (each scheduler task runs in its own transaction). */
+  taskTransactionTimeoutMs: number;
+  /**
+   * Max hospitals processed in parallel within one multi-hospital scheduler task.
+   * Each hospital still uses its own interactive transaction.
+   */
+  hospitalConcurrency: number;
   consentExpireEnabled: boolean;
   billingPaymentReconcileEnabled: boolean;
   billingRefundReconcileEnabled: boolean;
@@ -52,6 +64,18 @@ export function loadJobSchedulerConfig(): JobSchedulerConfig {
   return {
     enabled: readBoolean(process.env.JOB_SCHEDULER_ENABLED, true),
     intervalMs: readPositiveInt(process.env.JOB_SCHEDULER_INTERVAL_MS, 60_000),
+    tickTransactionTimeoutMs: readPositiveInt(
+      process.env.JOB_SCHEDULER_TICK_TRANSACTION_TIMEOUT_MS,
+      120_000,
+    ),
+    taskTransactionTimeoutMs: readPositiveInt(
+      process.env.JOB_SCHEDULER_TASK_TRANSACTION_TIMEOUT_MS,
+      5_000,
+    ),
+    hospitalConcurrency: Math.min(
+      readPositiveInt(process.env.JOB_SCHEDULER_HOSPITAL_CONCURRENCY, 4),
+      16,
+    ),
     consentExpireEnabled: readBoolean(
       process.env.JOB_CONSENT_EXPIRE_SCHEDULER_ENABLED,
       true,

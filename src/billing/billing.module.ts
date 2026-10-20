@@ -19,9 +19,15 @@ import {
   RAZORPAY_CHECKOUT_ADAPTER,
   UnconfiguredRazorpayCheckoutAdapter,
 } from './razorpay-checkout.adapter';
+import { BillingReconciliationServicesModule } from './billing-reconciliation-services.module';
 
 @Module({
-  imports: [CommonModule, AuditModule, ReportsBillingHookModule],
+  imports: [
+    CommonModule,
+    AuditModule,
+    ReportsBillingHookModule,
+    BillingReconciliationServicesModule,
+  ],
   controllers: [
     BillingController,
     BillingConfigController,
@@ -51,6 +57,7 @@ import {
     PaymentsService,
     RefundsService,
     InvoiceSplitPayerService,
+    BillingReconciliationServicesModule,
   ],
 })
 export class BillingModule {}

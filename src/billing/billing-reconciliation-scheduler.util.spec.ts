@@ -365,7 +365,8 @@ describe('billing-reconciliation-scheduler.util (integration)', () => {
         task.run({
           windowKey: 'w',
           tickAt,
-          transaction: scopeHospitals(transaction, [hospitalAId]),
+          hospitalId: hospitalAId,
+          transaction,
           jobService,
         }),
       );
@@ -432,13 +433,15 @@ describe('billing-reconciliation-scheduler.util (integration)', () => {
       prisma.$transaction(async (transaction) =>
         task.run({
           ...ctx,
-          transaction: scopeHospitals(transaction, [hospitalAId]),
+          hospitalId: hospitalAId,
+          transaction,
         }),
       ),
       prisma.$transaction(async (transaction) =>
         task.run({
           ...ctx,
-          transaction: scopeHospitals(transaction, [hospitalAId]),
+          hospitalId: hospitalAId,
+          transaction,
         }),
       ),
     ]);
@@ -476,7 +479,8 @@ describe('billing-reconciliation-scheduler.util (integration)', () => {
       task.run({
         windowKey: 'w',
         tickAt: new Date(),
-        transaction: scopeHospitals(transaction, [hospitalAId]),
+        hospitalId: hospitalAId,
+        transaction,
         jobService,
       }),
     );

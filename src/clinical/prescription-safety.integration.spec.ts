@@ -3,6 +3,7 @@ import {
   ClinicalEncounterType,
   ClinicalSafetyPolicyAction,
   InteractionAdapterStatus,
+  InteractionWhenUnavailable,
   PrescriptionSafetyFindingType,
   PrescriptionSafetySeverity,
   PrismaClient,
@@ -166,6 +167,20 @@ describe('Prescription safety (integration)', () => {
       InteractionAdapterStatus.UNAVAILABLE,
     );
 
+    const unavailableWarning = evaluation?.findings.find(
+      (f) =>
+        f.findingType === PrescriptionSafetyFindingType.INTERACTION &&
+        f.severity === PrescriptionSafetySeverity.WARNING,
+    );
+    expect(unavailableWarning).toBeDefined();
+    expect(unavailableWarning?.findingKey).toBe(
+      buildFindingKey(
+        PrescriptionSafetyFindingType.INTERACTION,
+        'UNAVAILABLE_WARNING',
+      ),
+    );
+    expect(unavailableWarning?.summary).toMatch(/manual/i);
+
     const audit = await prisma.auditLog.findFirst({
       where: {
         hospitalId,
@@ -176,6 +191,68 @@ describe('Prescription safety (integration)', () => {
     expect(audit).not.toBeNull();
   });
 
+  it('blocks prescription when interaction checker unavailable and policy is BLOCK', async () => {
+    if (!dbAvailable) {
+      return;
+    }
+
+    await policyService.upsertPolicyForHospital(hospitalId, {
+      interactionWhenUnavailable: InteractionWhenUnavailable.BLOCK,
+      allergyIngredientMatch: ClinicalSafetyPolicyAction.WARN,
+    });
+
+    const rxBefore = await prisma.prescription.count({ where: { hospitalId } });
+
+    await expect(
+      clinicalService.createPrescription(user(), encounterId, {
+        items: [{ medicationName: 'Vitamin B12', quantity: 1 }],
+      }),
+    ).rejects.toMatchObject({ response: { code: 'PRESCRIPTION_SAFETY_BLOCKED' } });
+
+    const rxAfter = await prisma.prescription.count({ where: { hospitalId } });
+    expect(rxAfter).toBe(rxBefore);
+  });
+
+  it('allows override when interaction checker unavailable and policy is BLOCK', async () => {
+    if (!dbAvailable) {
+      return;
+    }
+
+    await policyService.upsertPolicyForHospital(hospitalId, {
+      interactionWhenUnavailable: InteractionWhenUnavailable.BLOCK,
+      allergyIngredientMatch: ClinicalSafetyPolicyAction.WARN,
+    });
+
+    const findingKey = buildFindingKey(
+      PrescriptionSafetyFindingType.INTERACTION,
+      'UNAVAILABLE_BLOCK',
+    );
+
+    const created = await clinicalService.createPrescription(user(), encounterId, {
+      items: [{ medicationName: 'Vitamin B12 override', quantity: 1 }],
+      safetyOverrides: {
+        findingKeys: [findingKey!],
+        reason: 'Manual interaction review completed in unavailable-checker mode',
+      },
+    });
+
+    expect(created.interactionCheckAvailable).toBe(false);
+    expect(
+      created.safetyFindings?.some(
+        (f) => f.findingKey === findingKey && f.overridden,
+      ),
+    ).toBe(true);
+
+    const overrideAudit = await prisma.auditLog.findFirst({
+      where: {
+        hospitalId,
+        action: 'CLINICAL_PRESCRIPTION_SAFETY_OVERRIDE',
+        entityId: created.id,
+      },
+    });
+    expect(overrideAudit).not.toBeNull();
+  });
+
   it('blocks structured allergy match when hospital policy is BLOCK', async () => {
     if (!dbAvailable) {
       return;
@@ -183,6 +260,7 @@ describe('Prescription safety (integration)', () => {
 
     await policyService.upsertPolicyForHospital(hospitalId, {
       allergyIngredientMatch: ClinicalSafetyPolicyAction.BLOCK,
+      interactionWhenUnavailable: InteractionWhenUnavailable.ALLOW_WITH_WARNING,
     });
 
     const drug = await clinicalDrugService.createDrug(hospitalId, {
@@ -303,6 +381,7 @@ describe('Prescription safety (integration)', () => {
 
     await policyService.upsertPolicyForHospital(hospitalId, {
       allergyIngredientMatch: ClinicalSafetyPolicyAction.WARN,
+      interactionWhenUnavailable: InteractionWhenUnavailable.ALLOW_WITH_WARNING,
     });
 
     const drug = await clinicalDrugService.createDrug(hospitalId, {

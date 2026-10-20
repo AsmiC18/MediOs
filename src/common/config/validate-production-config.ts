@@ -1,3 +1,4 @@
+import { validateFieldEncryptionProductionConfig } from '../crypto/field-encryption.config';
 import { validatePrivacyRetentionProductionConfig } from '../../privacy/privacy-retention.config';
 import {
   validateAbdmCallbackAuthenticationFromEnv,
@@ -36,6 +37,8 @@ export function validateProductionConfig(): void {
   if (parseCorsOrigins(process.env.CORS_ORIGINS).length === 0) {
     throw new Error('CORS_ORIGINS is required in production.');
   }
+
+  validateFieldEncryptionProductionConfig();
 
   requireNonEmpty('ABDM_CALLBACK_SECRET');
 

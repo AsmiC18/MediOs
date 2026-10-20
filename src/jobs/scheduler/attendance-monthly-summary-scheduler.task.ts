@@ -12,6 +12,7 @@ import {
 export class AttendanceMonthlySummarySchedulerTask implements SchedulerTask {
   readonly name = 'attendance-monthly-summary';
   readonly requiresTestHospitalId = false;
+  readonly usesPerHospitalTransactions = true;
 
   async run(context: SchedulerExecutionContext): Promise<void> {
     const config = loadJobSchedulerConfig();
@@ -19,28 +20,25 @@ export class AttendanceMonthlySummarySchedulerTask implements SchedulerTask {
       return;
     }
 
-    const period = resolvePreviousUtcCalendarMonth(context.tickAt);
-    const hospitals = await context.transaction.hospital.findMany({
-      select: { id: true },
-      orderBy: { id: 'asc' },
-    });
-
-    for (const hospital of hospitals) {
-      await context.jobService.enqueueWithClient(context.transaction, {
-        hospitalId: hospital.id,
-        branchId: null,
-        type: JOB_TYPES.ATTENDANCE_MONTHLY_SUMMARY,
-        idempotencyKey: monthlySummaryJobIdempotencyKey(
-          hospital.id,
-          period.periodKey,
-        ),
-        payload: {
-          periodKey: period.periodKey,
-          periodYear: period.periodYear,
-          periodMonth: period.periodMonth,
-        },
-        maxAttempts: 5,
-      });
+    const hospitalId = context.hospitalId;
+    if (!hospitalId) {
+      throw new Error(
+        'attendance-monthly-summary requires hospitalId in scheduler context',
+      );
     }
+
+    const period = resolvePreviousUtcCalendarMonth(context.tickAt);
+    await context.jobService.enqueueWithClient(context.transaction, {
+      hospitalId,
+      branchId: null,
+      type: JOB_TYPES.ATTENDANCE_MONTHLY_SUMMARY,
+      idempotencyKey: monthlySummaryJobIdempotencyKey(hospitalId, period.periodKey),
+      payload: {
+        periodKey: period.periodKey,
+        periodYear: period.periodYear,
+        periodMonth: period.periodMonth,
+      },
+      maxAttempts: 5,
+    });
   }
 }

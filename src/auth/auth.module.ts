@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 
 import { JwtModule } from '@nestjs/jwt';
 
@@ -44,7 +44,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 
     CommonModule,
 
-    AuditModule,
+    forwardRef(() => AuditModule),
 
     PassportModule.register({
 
@@ -94,7 +94,13 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 
   ],
 
-  exports: [AuthService, PermissionsGuard, JwtModule],
+  exports: [
+    AuthService,
+    PermissionsGuard,
+    JwtModule,
+    RefreshRateLimitService,
+    RefreshRateLimitGuard,
+  ],
 
 })
 

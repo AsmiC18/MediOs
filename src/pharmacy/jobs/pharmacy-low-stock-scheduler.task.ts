@@ -8,6 +8,7 @@ import { formatUtcDayWindow } from '../../jobs/scheduler/scheduler-window.util';
 export class PharmacyLowStockSchedulerTask implements SchedulerTask {
   readonly name = 'pharmacy-low-stock-scan';
   readonly requiresTestHospitalId = false;
+  readonly usesPerHospitalTransactions = true;
 
   async run(context: SchedulerExecutionContext): Promise<void> {
     const config = loadJobSchedulerConfig();
@@ -15,21 +16,21 @@ export class PharmacyLowStockSchedulerTask implements SchedulerTask {
       return;
     }
 
-    const windowKey = formatUtcDayWindow(context.tickAt);
-    const hospitals = await context.transaction.hospital.findMany({
-      select: { id: true },
-      orderBy: { id: 'asc' },
-    });
-
-    for (const hospital of hospitals) {
-      await context.jobService.enqueueWithClient(context.transaction, {
-        hospitalId: hospital.id,
-        branchId: null,
-        type: JOB_TYPES.PHARMACY_LOW_STOCK_SCAN,
-        idempotencyKey: `${JOB_TYPES.PHARMACY_LOW_STOCK_SCAN}:${hospital.id}:${windowKey}`,
-        payload: { window: windowKey },
-        maxAttempts: 5,
-      });
+    const hospitalId = context.hospitalId;
+    if (!hospitalId) {
+      throw new Error(
+        'pharmacy-low-stock-scan requires hospitalId in scheduler context',
+      );
     }
+
+    const windowKey = formatUtcDayWindow(context.tickAt);
+    await context.jobService.enqueueWithClient(context.transaction, {
+      hospitalId,
+      branchId: null,
+      type: JOB_TYPES.PHARMACY_LOW_STOCK_SCAN,
+      idempotencyKey: `${JOB_TYPES.PHARMACY_LOW_STOCK_SCAN}:${hospitalId}:${windowKey}`,
+      payload: { window: windowKey },
+      maxAttempts: 5,
+    });
   }
 }

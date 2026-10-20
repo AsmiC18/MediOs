@@ -6,6 +6,7 @@ import {
   bootstrapPlanCatalogue,
 } from '../src/plans/plan-bootstrap.util';
 import { upsertDevelopmentIcd10Fixture } from '../src/clinical/icd10/icd10-development-fixture';
+import { requireSeedAdminPassword } from '../src/seed/seed-admin-password.util';
 
 const prisma = new PrismaClient();
 
@@ -850,6 +851,10 @@ async function main() {
       name: 'notifications:delivery:read',
       description: 'View internal notification delivery statistics',
     },
+    {
+      name: 'notifications:delivery:manage',
+      description: 'Retry failed email notification delivery',
+    },
     { name: 'hospitals:read', description: 'View hospital profile' },
     { name: 'hospitals:manage', description: 'Update hospital profile' },
     { name: 'branches:read', description: 'View branches' },
@@ -901,8 +906,7 @@ async function main() {
     }
   }
 
-  const demoPassword =
-    process.env.SEED_ADMIN_PASSWORD?.trim() || 'MediOS@12345';
+  const demoPassword = requireSeedAdminPassword();
   const passwordHash = await bcrypt.hash(demoPassword, 12);
 
   await prisma.user.upsert({

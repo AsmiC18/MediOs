@@ -26,6 +26,7 @@ import { RolesModule } from './roles/roles.module';
 import { PlansModule } from './plans/plans.module';
 import { PortalModule } from './portal/portal.module';
 import { EngagementModule } from './engagement/engagement.module';
+import { NotificationsModule } from './notifications/notifications.module';
 import { CommonModule } from './common/common.module';
 import { JobModule } from './jobs/job.module';
 import { JobSchedulerModule } from './jobs/scheduler/job-scheduler.module';
@@ -50,6 +51,7 @@ import { JobSchedulerModule } from './jobs/scheduler/job-scheduler.module';
     PlansModule,
     PortalModule,
     EngagementModule,
+    NotificationsModule,
     AttendanceModule,
     WorkSchedulesModule,
     BookingRulesModule,

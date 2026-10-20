@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { tryEnqueueRefundReconcileIfEligible } from '../../billing/billing-reconciliation-scheduler.util';
+import {
+  loadRefundReconcileJobHistoriesByRefundId,
+  tryEnqueueRefundReconcileIfEligible,
+} from '../../billing/billing-reconciliation-scheduler.util';
 import { REFUND_RECONCILIATION_RESOLVABLE_STATUSES } from '../../billing/refund-reconciliation.types';
 import { SchedulerExecutionContext, SchedulerTask } from './scheduler.types';
 
@@ -8,30 +11,38 @@ import { SchedulerExecutionContext, SchedulerTask } from './scheduler.types';
 export class BillingRefundReconcileSchedulerTask implements SchedulerTask {
   readonly name = 'billing-refund-reconcile';
   readonly requiresTestHospitalId = false;
+  readonly usesPerHospitalTransactions = true;
 
   async run(context: SchedulerExecutionContext): Promise<void> {
-    const hospitals = await context.transaction.hospital.findMany({
-      select: { id: true },
+    const hospitalId = context.hospitalId;
+    if (!hospitalId) {
+      throw new Error(
+        'billing-refund-reconcile requires hospitalId in scheduler context',
+      );
+    }
+
+    const refunds = await context.transaction.refund.findMany({
+      where: {
+        hospitalId,
+        status: { in: REFUND_RECONCILIATION_RESOLVABLE_STATUSES },
+      },
+      select: { id: true, hospitalId: true },
       orderBy: { id: 'asc' },
     });
 
-    for (const hospital of hospitals) {
-      const refunds = await context.transaction.refund.findMany({
-        where: {
-          hospitalId: hospital.id,
-          status: { in: REFUND_RECONCILIATION_RESOLVABLE_STATUSES },
-        },
-        select: { id: true, hospitalId: true },
-        orderBy: { id: 'asc' },
-      });
+    const historyByRefundId = await loadRefundReconcileJobHistoriesByRefundId(
+      context.transaction,
+      hospitalId,
+      refunds.map((refund) => refund.id),
+    );
 
-      for (const refund of refunds) {
-        await tryEnqueueRefundReconcileIfEligible(
-          context,
-          refund.hospitalId,
-          refund.id,
-        );
-      }
+    for (const refund of refunds) {
+      await tryEnqueueRefundReconcileIfEligible(
+        context,
+        refund.hospitalId,
+        refund.id,
+        historyByRefundId.get(refund.id),
+      );
     }
   }
 }

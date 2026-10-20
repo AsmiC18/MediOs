@@ -12,9 +12,9 @@ import {
 
   EmailNotificationAdapter,
 
-  UnconfiguredEmailProviderAdapter,
-
 } from './channels/email-notification.adapter';
+
+import { ResendEmailProviderAdapter } from './channels/resend-email.provider';
 
 import { InAppNotificationAdapter } from './channels/in-app-notification.adapter';
 
@@ -36,13 +36,21 @@ import { NotificationDeliveryStatsController } from './notification-delivery-sta
 
 import { NotificationDeliveryStatsService } from './notification-delivery-stats.service';
 
+import { NotificationEmailResendController } from './notification-email-resend.controller';
+
+import { NotificationEmailResendService } from './notification-email-resend.service';
+
 
 
 @Module({
 
   imports: [CommonModule, JobModule, AuditModule],
 
-  controllers: [StaffNotificationsController, NotificationDeliveryStatsController],
+  controllers: [
+    StaffNotificationsController,
+    NotificationDeliveryStatsController,
+    NotificationEmailResendController,
+  ],
 
   providers: [
 
@@ -60,15 +68,17 @@ import { NotificationDeliveryStatsService } from './notification-delivery-stats.
 
     NotificationDeliveryStatsService,
 
+    NotificationEmailResendService,
+
     InAppNotificationAdapter,
 
-    UnconfiguredEmailProviderAdapter,
+    ResendEmailProviderAdapter,
 
     {
 
       provide: EMAIL_PROVIDER_ADAPTER,
 
-      useExisting: UnconfiguredEmailProviderAdapter,
+      useExisting: ResendEmailProviderAdapter,
 
     },
 
@@ -95,6 +105,8 @@ import { NotificationDeliveryStatsService } from './notification-delivery-stats.
     StaffDomainEventInAppRouterService,
 
     NotificationDeliveryStatsService,
+
+    NotificationEmailResendService,
 
   ],
 

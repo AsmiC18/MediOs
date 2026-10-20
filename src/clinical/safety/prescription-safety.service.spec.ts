@@ -2,10 +2,12 @@ import {
   ClinicalSafetyPolicyAction,
   InteractionAdapterStatus,
   InteractionWhenUnavailable,
+  PrescriptionSafetyFindingType,
   PrescriptionSafetySeverity,
 } from '@prisma/client';
 import { UnavailableDrugInteractionAdapter } from '../adapters/unavailable-drug-interaction.adapter';
 import { ClinicalDrugService } from '../drugs/clinical-drug.service';
+import { buildFindingKey } from './finding-key.util';
 import { ClinicalSafetyPolicyService } from './clinical-safety-policy.service';
 import { PrescriptionSafetyBlockedException } from './prescription-safety-block.exception';
 import { PrescriptionSafetyService } from './prescription-safety.service';
@@ -59,6 +61,67 @@ describe('PrescriptionSafetyService', () => {
 
     expect(result.interactionAdapterStatus).toBe(InteractionAdapterStatus.UNAVAILABLE);
     expect(result.interactionCheckAvailable).toBe(false);
+  });
+
+  it('adds WARNING finding when adapter is UNAVAILABLE and policy is ALLOW_WITH_WARNING', async () => {
+    const result = await service.evaluateForPrescription({
+      hospitalId: 'h1',
+      patientId: 'p1',
+      patientAllergies: [],
+      patientUpdatedAt: new Date(),
+      dto: { items: [{ medicationName: 'Test' }] },
+    });
+
+    expect(result.interactionCheckAvailable).toBe(false);
+    expect(result.interactionAdapterStatus).toBe(InteractionAdapterStatus.UNAVAILABLE);
+
+    const warning = result.findings.find(
+      (f) =>
+        f.findingType === PrescriptionSafetyFindingType.INTERACTION &&
+        f.severity === PrescriptionSafetySeverity.WARNING,
+    );
+    expect(warning).toBeDefined();
+    expect(warning?.findingKey).toBe(
+      buildFindingKey(
+        PrescriptionSafetyFindingType.INTERACTION,
+        'UNAVAILABLE_WARNING',
+      ),
+    );
+    expect(warning?.summary).toMatch(/unavailable/i);
+    expect(warning?.summary).toMatch(/manual/i);
+    expect(warning?.detailJson).toEqual({
+      adapterStatus: InteractionAdapterStatus.UNAVAILABLE,
+    });
+    expect(result.blockingFindingKeys).toHaveLength(0);
+  });
+
+  it('adds BLOCK finding when adapter is UNAVAILABLE and policy is BLOCK', async () => {
+    (policyService.getPolicyForHospital as jest.Mock).mockResolvedValueOnce({
+      allergyUnresolvedDrugDefault: ClinicalSafetyPolicyAction.WARN,
+      allergyIngredientMatch: ClinicalSafetyPolicyAction.WARN,
+      allergyTextFallback: ClinicalSafetyPolicyAction.WARN,
+      interactionWhenUnavailable: InteractionWhenUnavailable.BLOCK,
+    });
+
+    const result = await service.evaluateForPrescription({
+      hospitalId: 'h1',
+      patientId: 'p1',
+      patientAllergies: [],
+      patientUpdatedAt: new Date(),
+      dto: { items: [{ medicationName: 'Test' }] },
+    });
+
+    expect(result.interactionCheckAvailable).toBe(false);
+    const block = result.findings.find(
+      (f) => f.severity === PrescriptionSafetySeverity.BLOCK,
+    );
+    expect(block?.findingKey).toBe(
+      buildFindingKey(
+        PrescriptionSafetyFindingType.INTERACTION,
+        'UNAVAILABLE_BLOCK',
+      ),
+    );
+    expect(result.blockingFindingKeys).toContain(block?.findingKey);
   });
 
   it('throws when BLOCK findings exist without override', () => {

@@ -116,7 +116,7 @@ Non-leaders log `"leaderAcquired": false`, `"outcome": "skipped"`.
 
 The worker does **not** expose HTTP. Liveness is the running process plus these logs.
 
-**Note:** The worker process does not call `validateProductionConfig()` (API does). Compose should still supply the same `.env.docker` so job handlers can reach Razorpay, Postgres, and configured notification email providers.
+**Note:** Both the API and the worker call `validateProductionConfig()` at startup (including required `FIELD_ENCRYPTION_KEY` in production). Use the same `.env.docker` for both containers so validation, encryption, Razorpay, Postgres, and notification email settings stay aligned.
 
 ### Stuck jobs
 
@@ -270,7 +270,10 @@ See `.env.example` for all `ABDM_*` settings. Do not commit real credentials.
 
 ```bash
 npm run build
+npm run audit:staff-routes
 node scripts/test-abdm.cjs
 ```
 
-Requires the API running on port 3000 and a seeded database.
+`npm run audit:staff-routes` statically checks that staff JWT controllers declare `PermissionsGuard` and `@RequirePermissions` (no database or API required). Public auth, health, patient portal, ABDM callback, and Razorpay webhook controllers are exempt.
+
+Requires the API running on port 3000 and a seeded database for `test-abdm.cjs`.

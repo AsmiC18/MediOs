@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
+import { isProduction } from '../config/app-environment';
+import { getFieldEncryptionKeyFromEnv } from './field-encryption.config';
 
 const VERSION_PREFIX = 'v1:';
 
@@ -8,16 +10,7 @@ export class FieldEncryptionService {
   private readonly key: Buffer | null;
 
   constructor() {
-    const raw = process.env.FIELD_ENCRYPTION_KEY?.trim();
-    if (!raw) {
-      this.key = null;
-      return;
-    }
-    const key = Buffer.from(raw, raw.length === 64 ? 'hex' : 'base64');
-    if (key.length !== 32) {
-      throw new Error('FIELD_ENCRYPTION_KEY must decode to 32 bytes');
-    }
-    this.key = key;
+    this.key = getFieldEncryptionKeyFromEnv();
   }
 
   isConfigured(): boolean {
@@ -29,6 +22,11 @@ export class FieldEncryptionService {
       return null;
     }
     if (!this.key) {
+      if (isProduction()) {
+        throw new Error(
+          'FIELD_ENCRYPTION_KEY is required in production to encrypt protected fields.',
+        );
+      }
       return plaintext;
     }
     const iv = randomBytes(12);

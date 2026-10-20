@@ -15,12 +15,9 @@ import { PharmacyInventoryJobModule } from '../pharmacy/jobs/pharmacy-inventory-
 import { DiagnosticsJobModule } from '../diagnostics/diagnostics-job.module';
 import { PrivacyRetentionJobModule } from '../privacy/privacy-retention-job.module';
 import { ReportsJobModule } from '../reports/reports-job.module';
-import { ReportProjectionRefreshJobHandler } from '../reports/report-projection-refresh.job-handler';
 import { PatientPrivacyJobModule } from '../privacy/patient-privacy-job.module';
 import { EngagementJobModule } from '../engagement/engagement-job.module';
 import { PatientPrivacyErasureHandler } from '../jobs/handlers/patient-privacy-erasure.handler';
-import { PatientNpsTriggerHandler } from '../jobs/handlers/patient-nps-trigger.handler';
-import { PatientWinbackHandler } from '../jobs/handlers/patient-winback.handler';
 import { AbdmConsentExpireHandler } from '../jobs/handlers/abdm-consent-expire.handler';
 import { PatientAtRiskEvaluateHandler } from '../jobs/handlers/patient-at-risk-evaluate.handler';
 import { StaffAttendanceConsultationJobHandler } from '../billing/staff-attendance-consultation.job-handler';
@@ -62,7 +59,6 @@ import { JobWorkerService } from '../jobs/job-worker.service';
     ReportsJobModule,
   ],
   providers: [
-    ReportProjectionRefreshJobHandler,
     JobHandlerRegistry,
     JobWorkerService,
     AbdmConsentExpireHandler,
@@ -71,8 +67,6 @@ import { JobWorkerService } from '../jobs/job-worker.service';
     AttendanceMonthlySummaryHandler,
     PrivacyRetentionPurgeHandler,
     PatientPrivacyErasureHandler,
-    PatientNpsTriggerHandler,
-    PatientWinbackHandler,
     JobHandlerRegistrar,
     PharmacyDispensingBillingJobHandler,
     PharmacyLowStockScanHandler,

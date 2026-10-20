@@ -18,6 +18,11 @@ export interface SchedulerTask {
    * Production tasks that resolve hospital scope themselves leave this unset/false.
    */
   readonly requiresTestHospitalId?: boolean;
+  /**
+   * When true, runTick runs the task once per hospital, each in its own Prisma
+   * interactive transaction (see scheduler-per-hospital-transaction.util.ts).
+   */
+  readonly usesPerHospitalTransactions?: boolean;
   run(context: SchedulerExecutionContext): Promise<void>;
 }
 
@@ -25,10 +30,23 @@ export function schedulerTaskRequiresTestHospitalId(task: SchedulerTask): boolea
   return task.requiresTestHospitalId === true;
 }
 
+export function schedulerTaskUsesPerHospitalTransactions(
+  task: SchedulerTask,
+): boolean {
+  return task.usesPerHospitalTransactions === true;
+}
+
+export type SchedulerTickOutcome =
+  | 'skipped'
+  | 'completed'
+  | 'partial'
+  | 'failed';
+
 export type SchedulerTickResult = {
   windowKey: string;
   leaderAcquired: boolean;
   tasksRun: number;
   taskOutcomes: Array<{ name: string; outcome: 'success' | 'failed' }>;
   durationMs: number;
+  outcome: SchedulerTickOutcome;
 };

@@ -7,11 +7,18 @@ import {
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { JobService } from '../job.service';
-import { truncateJobError } from '../job-error.util';
+import {
+  serializeJobErrorForLog,
+  truncateJobError,
+} from '../job-error.util';
 import {
   JobSchedulerConfig,
   loadJobSchedulerConfig,
 } from './job-scheduler.config';
+import {
+  shutdownSchedulerLeaderLockPool,
+  withDedicatedSchedulerLeaderLock,
+} from './scheduler-leader-lock-pg.util';
 import { resolveJobSchedulerLeaderLockKey } from './scheduler-lock.util';
 import { SchedulerTaskRegistry } from './scheduler-task.registry';
 import { AppointmentReminderSchedulerTask } from './appointment-reminder-scheduler.task';
@@ -27,18 +34,33 @@ import { PharmacyLowStockSchedulerTask } from '../../pharmacy/jobs/pharmacy-low-
 import {
   SchedulerExecutionContext,
   SchedulerTask,
+  SchedulerTickOutcome,
   SchedulerTickResult,
   schedulerTaskRequiresTestHospitalId,
+  schedulerTaskUsesPerHospitalTransactions,
 } from './scheduler.types';
+import { runSchedulerTaskForEachHospital } from './scheduler-per-hospital-transaction.util';
 import { schedulerSavepoint } from './scheduler-savepoint.util';
 import { formatUtcMinuteWindow } from './scheduler-window.util';
-
 const SCHEDULER_INTERVAL_NAME = 'medios-job-scheduler-tick';
 
+/**
+ * Scheduler leader orchestration holds a PostgreSQL session advisory lock on a
+ * dedicated connection (not an open interactive transaction). Each task runs in
+ * its own Prisma interactive transaction (default 5s), so successful tasks commit
+ * even if a later task fails. Job idempotency keys prevent duplicate enqueue.
+ */
 @Injectable()
 export class JobSchedulerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(JobSchedulerService.name);
   private readonly config: JobSchedulerConfig;
+
+  private tickInFlight = false;
+
+  /** Resolves when the current tick (including post-timeout work) has fully finished. */
+  private activeTickDrain: Promise<void> | null = null;
+
+  private shuttingDown = false;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -120,6 +142,9 @@ export class JobSchedulerService implements OnModuleInit, OnModuleDestroy {
     }
 
     const interval = setInterval(() => {
+      if (this.shuttingDown) {
+        return;
+      }
       void this.runTick().catch((error) => {
         this.logger.error(
           JSON.stringify({
@@ -142,12 +167,17 @@ export class JobSchedulerService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  onModuleDestroy(): void {
+  async onModuleDestroy(): Promise<void> {
+    this.shuttingDown = true;
     try {
       this.schedulerRegistry.deleteInterval(SCHEDULER_INTERVAL_NAME);
     } catch {
       // Interval was never registered when scheduler is disabled.
     }
+    if (this.activeTickDrain) {
+      await this.activeTickDrain;
+    }
+    await shutdownSchedulerLeaderLockPool();
   }
 
   async runTick(tickAt: Date = new Date()): Promise<SchedulerTickResult> {
@@ -161,123 +191,305 @@ export class JobSchedulerService implements OnModuleInit, OnModuleDestroy {
         tasksRun: 0,
         taskOutcomes: [],
         durationMs: Date.now() - started,
+        outcome: 'skipped',
       };
     }
+
+    if (this.shuttingDown) {
+      return {
+        windowKey,
+        leaderAcquired: false,
+        tasksRun: 0,
+        taskOutcomes: [],
+        durationMs: Date.now() - started,
+        outcome: 'skipped',
+      };
+    }
+
+    if (this.tickInFlight) {
+      this.logger.log(
+        JSON.stringify({
+          event: 'scheduler_tick_skipped',
+          scheduler: SCHEDULER_INTERVAL_NAME,
+          windowKey,
+          reason: 'tick_in_flight',
+        }),
+      );
+      return {
+        windowKey,
+        leaderAcquired: false,
+        tasksRun: 0,
+        taskOutcomes: [],
+        durationMs: Date.now() - started,
+        outcome: 'skipped',
+      };
+    }
+
+    this.tickInFlight = true;
+
+    let resolveTickDrain: (() => void) | undefined;
+    this.activeTickDrain = new Promise<void>((resolve) => {
+      resolveTickDrain = resolve;
+    });
 
     const taskOutcomes: SchedulerTickResult['taskOutcomes'] = [];
     let leaderAcquired = false;
     let tasksRun = 0;
+    let tickFailed = false;
+    let pendingWorkCompletion: Promise<void> | undefined;
+
+    const lockKey = resolveJobSchedulerLeaderLockKey();
 
     try {
-      await this.prisma.$transaction(async (transaction) => {
-        const lockRows = await transaction.$queryRaw<Array<{ locked: boolean }>>`
-          SELECT pg_try_advisory_xact_lock(hashtext(${resolveJobSchedulerLeaderLockKey()})) AS locked
-        `;
-        leaderAcquired = lockRows[0]?.locked === true;
+      const lockRun = await withDedicatedSchedulerLeaderLock(
+        lockKey,
+        async () => {
+          const tasks = this.taskRegistry.list();
+          const testHospitalId = this.config.testHospitalId;
 
-        if (!leaderAcquired) {
-          this.logger.log(
-            JSON.stringify({
-              event: 'scheduler_tick',
-              scheduler: SCHEDULER_INTERVAL_NAME,
-              windowKey,
-              leaderAcquired: false,
-              outcome: 'skipped',
+          const taskResults = await Promise.all(
+            tasks.map(async (task, taskIndex) => {
+              if (
+                schedulerTaskRequiresTestHospitalId(task) &&
+                !testHospitalId
+              ) {
+                this.logger.warn(
+                  JSON.stringify({
+                    event: 'scheduler_task_skipped',
+                    scheduler: SCHEDULER_INTERVAL_NAME,
+                    windowKey,
+                    task: task.name,
+                    reason: 'missing_test_hospital_scope',
+                  }),
+                );
+                return null;
+              }
+
+              const context: Omit<SchedulerExecutionContext, 'transaction'> =
+                {
+                  windowKey,
+                  tickAt,
+                  ...(testHospitalId ? { hospitalId: testHospitalId } : {}),
+                  jobService: this.jobService,
+                };
+
+              const taskStarted = Date.now();
+              try {
+                await this.runSchedulerTaskInTransaction(
+                  task,
+                  context,
+                  taskIndex,
+                );
+                this.logger.log(
+                  JSON.stringify({
+                    event: 'scheduler_task_completed',
+                    scheduler: SCHEDULER_INTERVAL_NAME,
+                    windowKey,
+                    task: task.name,
+                    durationMs: Date.now() - taskStarted,
+                  }),
+                );
+                return {
+                  name: task.name,
+                  outcome: 'success' as const,
+                };
+              } catch (error) {
+                this.logger.warn(
+                  JSON.stringify({
+                    event: 'scheduler_task_failed',
+                    scheduler: SCHEDULER_INTERVAL_NAME,
+                    windowKey,
+                    task: task.name,
+                    durationMs: Date.now() - taskStarted,
+                    message: truncateJobError(error),
+                  }),
+                );
+                return {
+                  name: task.name,
+                  outcome: 'failed' as const,
+                };
+              }
             }),
           );
-          return;
-        }
 
-        const tasks = this.taskRegistry.list();
-        const testHospitalId = this.config.testHospitalId;
-
-        for (let taskIndex = 0; taskIndex < tasks.length; taskIndex += 1) {
-          const task = tasks[taskIndex];
-          if (schedulerTaskRequiresTestHospitalId(task) && !testHospitalId) {
-            this.logger.warn(
-              JSON.stringify({
-                event: 'scheduler_task_skipped',
-                scheduler: SCHEDULER_INTERVAL_NAME,
-                windowKey,
-                task: task.name,
-                reason: 'missing_test_hospital_scope',
-              }),
-            );
-            continue;
+          for (const result of taskResults) {
+            if (!result) {
+              continue;
+            }
+            taskOutcomes.push(result);
+            if (result.outcome === 'success') {
+              tasksRun += 1;
+            }
           }
+        },
+        { orchestrationTimeoutMs: this.config.tickTransactionTimeoutMs },
+      );
 
-          const context: SchedulerExecutionContext = {
-            windowKey,
-            tickAt,
-            ...(testHospitalId ? { hospitalId: testHospitalId } : {}),
-            transaction,
-            jobService: this.jobService,
-          };
-
-          const savepointName = `scheduler_task_${taskIndex}`;
-          await schedulerSavepoint(transaction, 'SAVEPOINT', savepointName);
-          try {
-            await this.runTask(task, context);
-            await schedulerSavepoint(
-              transaction,
-              'RELEASE SAVEPOINT',
-              savepointName,
-            );
-            tasksRun += 1;
-            taskOutcomes.push({ name: task.name, outcome: 'success' });
-          } catch (error) {
-            await schedulerSavepoint(
-              transaction,
-              'ROLLBACK TO SAVEPOINT',
-              savepointName,
-            );
-            taskOutcomes.push({ name: task.name, outcome: 'failed' });
-            this.logger.warn(
-              JSON.stringify({
-                event: 'scheduler_task_failed',
-                scheduler: SCHEDULER_INTERVAL_NAME,
-                windowKey,
-                task: task.name,
-                message: truncateJobError(error),
-              }),
-            );
-          }
-        }
-
+      if (!lockRun.acquired) {
+        leaderAcquired = false;
         this.logger.log(
           JSON.stringify({
             event: 'scheduler_tick',
             scheduler: SCHEDULER_INTERVAL_NAME,
             windowKey,
-            leaderAcquired: true,
-            tasksRun,
-            durationMs: Date.now() - started,
-            outcome: 'completed',
+            leaderAcquired: false,
+            outcome: 'skipped',
           }),
         );
-      });
+      } else if ('orchestrationTimedOut' in lockRun && lockRun.orchestrationTimedOut) {
+        leaderAcquired = true;
+        tickFailed = true;
+        pendingWorkCompletion = lockRun.workCompletion;
+        this.logger.error(
+          JSON.stringify({
+            event: 'scheduler_tick_failed',
+            scheduler: SCHEDULER_INTERVAL_NAME,
+            windowKey,
+            message: 'scheduler leader orchestration timed out',
+            orchestrationTimeoutMs: this.config.tickTransactionTimeoutMs,
+            note: 'tick_work_continues_until_settled',
+          }),
+        );
+      } else {
+        leaderAcquired = true;
+      }
     } catch (error) {
+      tickFailed = true;
+      const errorDetails = serializeJobErrorForLog(error);
       this.logger.error(
         JSON.stringify({
           event: 'scheduler_tick_failed',
           scheduler: SCHEDULER_INTERVAL_NAME,
           windowKey,
-          message: truncateJobError(error),
+          message: errorDetails.message,
+          error: errorDetails,
         }),
       );
     }
 
-    return {
+    const outcome = this.resolveTickOutcome(
+      leaderAcquired,
+      taskOutcomes,
+      tickFailed,
+    );
+
+    if (leaderAcquired) {
+      this.logger.log(
+        JSON.stringify({
+          event: 'scheduler_tick',
+          scheduler: SCHEDULER_INTERVAL_NAME,
+          windowKey,
+          leaderAcquired: true,
+          tasksRun,
+          durationMs: Date.now() - started,
+          outcome,
+        }),
+      );
+    }
+
+    const tickResult: SchedulerTickResult = {
       windowKey,
       leaderAcquired,
       tasksRun,
       taskOutcomes,
       durationMs: Date.now() - started,
+      outcome,
     };
+
+    if (pendingWorkCompletion) {
+      void pendingWorkCompletion.finally(() => {
+        this.finishTickLifecycle(resolveTickDrain);
+      });
+    } else {
+      this.finishTickLifecycle(resolveTickDrain);
+    }
+
+    return tickResult;
+  }
+
+  private finishTickLifecycle(resolveTickDrain?: () => void): void {
+    this.tickInFlight = false;
+    resolveTickDrain?.();
+    this.activeTickDrain = null;
   }
 
   getConfig(): JobSchedulerConfig {
     return this.config;
+  }
+
+  private resolveTickOutcome(
+    leaderAcquired: boolean,
+    taskOutcomes: SchedulerTickResult['taskOutcomes'],
+    tickFailed: boolean,
+  ): SchedulerTickOutcome {
+    if (!leaderAcquired) {
+      return 'skipped';
+    }
+    if (tickFailed) {
+      return taskOutcomes.some((row) => row.outcome === 'success')
+        ? 'partial'
+        : 'failed';
+    }
+    if (taskOutcomes.length === 0) {
+      return 'completed';
+    }
+    if (taskOutcomes.every((row) => row.outcome === 'success')) {
+      return 'completed';
+    }
+    if (taskOutcomes.some((row) => row.outcome === 'success')) {
+      return 'partial';
+    }
+    return 'failed';
+  }
+
+  private async runSchedulerTaskInTransaction(
+    task: SchedulerTask,
+    context: Omit<SchedulerExecutionContext, 'transaction'>,
+    taskIndex: number,
+  ): Promise<void> {
+    if (schedulerTaskUsesPerHospitalTransactions(task)) {
+      await runSchedulerTaskForEachHospital(
+        this.prisma,
+        task,
+        context,
+        {
+          scheduler: SCHEDULER_INTERVAL_NAME,
+          windowKey: context.windowKey,
+          taskName: task.name,
+          taskIndex,
+          taskTransactionTimeoutMs: this.config.taskTransactionTimeoutMs,
+          taskTransactionMaxWaitMs: 10_000,
+          hospitalConcurrency: this.config.hospitalConcurrency,
+        },
+      );
+      return;
+    }
+
+    await this.prisma.$transaction(
+      async (transaction) => {
+        const savepointName = `scheduler_task_${taskIndex}`;
+        await schedulerSavepoint(transaction, 'SAVEPOINT', savepointName);
+        try {
+          await this.runTask(task, { ...context, transaction });
+          await schedulerSavepoint(
+            transaction,
+            'RELEASE SAVEPOINT',
+            savepointName,
+          );
+        } catch (error) {
+          await schedulerSavepoint(
+            transaction,
+            'ROLLBACK TO SAVEPOINT',
+            savepointName,
+          );
+          throw error;
+        }
+      },
+      {
+        maxWait: 10_000,
+        timeout: this.config.taskTransactionTimeoutMs,
+      },
+    );
   }
 
   private async runTask(

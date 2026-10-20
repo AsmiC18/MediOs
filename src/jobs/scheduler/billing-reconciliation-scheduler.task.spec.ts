@@ -53,9 +53,6 @@ describe('Billing reconciliation scheduler tasks (unit)', () => {
       },
     ];
     const transaction = {
-      hospital: {
-        findMany: jest.fn().mockResolvedValue([{ id: 'h1' }]),
-      },
       payment: {
         findMany: jest.fn().mockResolvedValue(
           payments.map((p) => ({ id: p.id, hospitalId: p.hospitalId })),
@@ -69,6 +66,7 @@ describe('Billing reconciliation scheduler tasks (unit)', () => {
     await paymentTask.run({
       windowKey: 'w',
       tickAt: new Date(),
+      hospitalId: 'h1',
       transaction: transaction as never,
       jobService: { enqueueWithClient } as never,
     });
@@ -86,6 +84,7 @@ describe('Billing reconciliation scheduler tasks (unit)', () => {
         }),
       }),
     );
+    expect(transaction.job.findMany).toHaveBeenCalledTimes(1);
     expect(enqueueWithClient).toHaveBeenCalledTimes(3);
     expect(enqueueWithClient.mock.calls[0][1]).toMatchObject({
       hospitalId: 'h1',
@@ -99,9 +98,6 @@ describe('Billing reconciliation scheduler tasks (unit)', () => {
   it('R. does not query terminal payment statuses in scheduler filter', async () => {
     const paymentTask = new BillingPaymentReconcileSchedulerTask();
     const transaction = {
-      hospital: {
-        findMany: jest.fn().mockResolvedValue([{ id: 'h1' }]),
-      },
       payment: {
         findMany: jest.fn().mockResolvedValue([]),
       },
@@ -112,6 +108,7 @@ describe('Billing reconciliation scheduler tasks (unit)', () => {
     await paymentTask.run({
       windowKey: 'w',
       tickAt: new Date(),
+      hospitalId: 'h1',
       transaction: transaction as never,
       jobService: { enqueueWithClient: jest.fn() } as never,
     });
@@ -126,9 +123,6 @@ describe('Billing reconciliation scheduler tasks (unit)', () => {
     const refundTask = new BillingRefundReconcileSchedulerTask();
     const enqueueWithClient = jest.fn().mockResolvedValue({ id: 'j1' });
     const transaction = {
-      hospital: {
-        findMany: jest.fn().mockResolvedValue([{ id: 'h1' }]),
-      },
       refund: {
         findMany: jest.fn().mockResolvedValue([
           { id: 'r1', hospitalId: 'h1' },
@@ -143,6 +137,7 @@ describe('Billing reconciliation scheduler tasks (unit)', () => {
     await refundTask.run({
       windowKey: 'w',
       tickAt: new Date(),
+      hospitalId: 'h1',
       transaction: transaction as never,
       jobService: { enqueueWithClient } as never,
     });
@@ -156,15 +151,13 @@ describe('Billing reconciliation scheduler tasks (unit)', () => {
         }),
       }),
     );
+    expect(transaction.job.findMany).toHaveBeenCalledTimes(1);
     expect(enqueueWithClient).toHaveBeenCalledTimes(2);
   });
 
   it('T. refund scheduler excludes terminal statuses from query filter', async () => {
     const refundTask = new BillingRefundReconcileSchedulerTask();
     const transaction = {
-      hospital: {
-        findMany: jest.fn().mockResolvedValue([{ id: 'h1' }]),
-      },
       refund: {
         findMany: jest.fn().mockResolvedValue([]),
       },
@@ -175,6 +168,7 @@ describe('Billing reconciliation scheduler tasks (unit)', () => {
     await refundTask.run({
       windowKey: 'w',
       tickAt: new Date(),
+      hospitalId: 'h1',
       transaction: transaction as never,
       jobService: { enqueueWithClient: jest.fn() } as never,
     });
@@ -197,8 +191,8 @@ describe('Billing reconciliation scheduler tasks (unit)', () => {
 
     await paymentTask.run({
       ...ctx,
+      hospitalId: 'h1',
       transaction: {
-        hospital: { findMany: jest.fn().mockResolvedValue([{ id: 'h1' }]) },
         payment: {
           findMany: jest
             .fn()
@@ -209,8 +203,8 @@ describe('Billing reconciliation scheduler tasks (unit)', () => {
     });
     await refundTask.run({
       ...ctx,
+      hospitalId: 'h1',
       transaction: {
-        hospital: { findMany: jest.fn().mockResolvedValue([{ id: 'h1' }]) },
         refund: {
           findMany: jest
             .fn()
@@ -234,8 +228,8 @@ describe('Billing reconciliation scheduler tasks (unit)', () => {
     await paymentTask.run({
       windowKey: 'w',
       tickAt: new Date(),
+      hospitalId: 'h1',
       transaction: {
-        hospital: { findMany: jest.fn().mockResolvedValue([{ id: 'h1' }]) },
         payment: {
           findMany: jest
             .fn()
@@ -356,7 +350,8 @@ describe('Billing reconciliation scheduler tasks (integration)', () => {
         task.run({
           windowKey: 'w',
           tickAt: new Date(),
-          transaction: scopeHospitals(transaction, [hospitalId]),
+          hospitalId,
+          transaction,
           jobService,
         }),
       );
@@ -413,7 +408,8 @@ describe('Billing reconciliation scheduler tasks (integration)', () => {
         task.run({
           windowKey: 'w',
           tickAt: new Date(),
-          transaction: scopeHospitals(transaction, [hospitalId]),
+          hospitalId,
+          transaction,
           jobService,
         }),
       );

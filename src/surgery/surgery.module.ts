@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 
 import { AuditModule } from '../audit/audit.module';
 
+import { DepartmentBillingJobModule } from '../billing/department/department-billing-job.module';
+
 import { CommonModule } from '../common/common.module';
 
 import { SchedulingModule } from '../scheduling/scheduling.module';
@@ -18,7 +20,13 @@ import { SurgeryPreOpChecklistService } from './surgery-pre-op-checklist.service
 
 @Module({
 
-  imports: [CommonModule, AuditModule, SchedulingModule, NotificationsModule],
+  imports: [
+    CommonModule,
+    AuditModule,
+    SchedulingModule,
+    NotificationsModule,
+    DepartmentBillingJobModule,
+  ],
 
   controllers: [SurgeryRequestController, SurgeryScheduleController],
 

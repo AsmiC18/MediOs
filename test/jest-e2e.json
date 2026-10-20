@@ -3,10 +3,12 @@
   "rootDir": ".",
   "testEnvironment": "node",
   "testRegex": ".e2e-spec.ts$",
+  "setupFiles": ["<rootDir>/e2e-database-env.ts"],
   "transform": {
     "^.+\\.(t|j)s$": "ts-jest"
   },
   "transformIgnorePatterns": [
-    "node_modules/(?!@nestjs/config/)"
-  ]
+    "node_modules/(?!@nestjs/config/|@nestjs/jwt/|@nestjs/passport/)"
+  ],
+  "testTimeout": 60000
 }

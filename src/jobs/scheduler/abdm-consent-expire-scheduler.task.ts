@@ -8,23 +8,22 @@ import { formatUtcHourWindow } from './scheduler-window.util';
 export class AbdmConsentExpireSchedulerTask implements SchedulerTask {
   readonly name = 'abdm-consent-expire';
   readonly requiresTestHospitalId = false;
+  readonly usesPerHospitalTransactions = true;
 
   async run(context: SchedulerExecutionContext): Promise<void> {
-    const windowKey = formatUtcHourWindow(context.tickAt);
-    const hospitals = await context.transaction.hospital.findMany({
-      select: { id: true },
-      orderBy: { id: 'asc' },
-    });
-
-    for (const hospital of hospitals) {
-      await context.jobService.enqueueWithClient(context.transaction, {
-        hospitalId: hospital.id,
-        branchId: null,
-        type: JOB_TYPES.ABDM_CONSENT_EXPIRE,
-        idempotencyKey: `${JOB_TYPES.ABDM_CONSENT_EXPIRE}:${hospital.id}:${windowKey}`,
-        payload: { window: windowKey },
-        maxAttempts: 5,
-      });
+    const hospitalId = context.hospitalId;
+    if (!hospitalId) {
+      throw new Error('abdm-consent-expire requires hospitalId in scheduler context');
     }
+
+    const windowKey = formatUtcHourWindow(context.tickAt);
+    await context.jobService.enqueueWithClient(context.transaction, {
+      hospitalId,
+      branchId: null,
+      type: JOB_TYPES.ABDM_CONSENT_EXPIRE,
+      idempotencyKey: `${JOB_TYPES.ABDM_CONSENT_EXPIRE}:${hospitalId}:${windowKey}`,
+      payload: { window: windowKey },
+      maxAttempts: 5,
+    });
   }
 }

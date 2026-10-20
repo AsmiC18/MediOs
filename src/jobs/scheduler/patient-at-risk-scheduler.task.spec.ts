@@ -18,16 +18,20 @@ describe('PatientAtRiskSchedulerTask', () => {
     const enqueueWithClient = jest.fn().mockResolvedValue({ id: 'job-1' });
     const tickAt = new Date('2026-04-10T15:30:00.000Z');
 
+    const transaction = {} as never;
+
     await task.run({
       windowKey: 'unused',
       tickAt,
-      transaction: {
-        hospital: {
-          findMany: jest
-            .fn()
-            .mockResolvedValue([{ id: 'hospital-a' }, { id: 'hospital-b' }]),
-        },
-      } as never,
+      hospitalId: 'hospital-a',
+      transaction,
+      jobService: { enqueueWithClient } as never,
+    });
+    await task.run({
+      windowKey: 'unused',
+      tickAt,
+      hospitalId: 'hospital-b',
+      transaction,
       jobService: { enqueueWithClient } as never,
     });
 
@@ -54,9 +58,8 @@ describe('PatientAtRiskSchedulerTask', () => {
     await task.run({
       windowKey: 'w',
       tickAt: new Date('2026-04-10T00:00:00.000Z'),
-      transaction: {
-        hospital: { findMany: jest.fn() },
-      } as never,
+      hospitalId: 'hospital-a',
+      transaction: {} as never,
       jobService: { enqueueWithClient } as never,
     });
 
