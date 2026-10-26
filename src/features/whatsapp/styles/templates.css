@@ -1,0 +1,804 @@
+/* =========================================================
+   MEDIOS WHATSAPP — TEMPLATE MANAGER (scoped)
+   All classes are prefixed with wa-* and only target the
+   WhatsApp template subtree / modals. Uses the palette vars
+   defined on .wa-module in inbox.css. No global rules changed.
+   ========================================================= */
+
+/* =========================
+   PAGE SHELL
+   ========================= */
+
+.wa-templates-page {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.wa-templates-page .wa-loading-block,
+.wa-templates-page .wa-error-block {
+  min-height: 300px;
+}
+
+/* =========================
+   SUMMARY CHIPS
+   ========================= */
+
+.wa-summary-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: -10px 0 16px;
+}
+
+.wa-summary-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 14px;
+  background: var(--wa-paper);
+  border: 1px solid var(--wa-border);
+  border-radius: 999px;
+}
+
+.wa-summary-item span {
+  color: var(--wa-muted);
+  font-size: 12.5px;
+}
+
+.wa-summary-item strong {
+  color: var(--wa-teal);
+  font-size: 13px;
+}
+
+/* =========================
+   TOOLBAR — search + filters
+   ========================= */
+
+.wa-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 16px;
+  margin-bottom: 18px;
+  background: var(--wa-paper);
+  border: 1px solid var(--wa-border);
+  border-radius: 12px;
+}
+
+.wa-template-search {
+  position: relative;
+  flex: 1 1 260px;
+}
+
+.wa-template-search .wa-search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--wa-faint);
+  font-size: 15px;
+  pointer-events: none;
+}
+
+.wa-template-search input {
+  width: 100%;
+  padding: 11px 13px 11px 36px;
+  background: var(--wa-white);
+  border: 1px solid var(--wa-input-border);
+  border-radius: var(--wa-radius-sm);
+  color: var(--wa-ink);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.wa-template-search input::placeholder {
+  color: var(--wa-faint);
+}
+
+.wa-template-search input:focus {
+  border-color: var(--wa-teal);
+}
+
+.wa-template-select {
+  min-width: 180px;
+  padding: 11px 12px;
+  background: var(--wa-white);
+  border: 1px solid var(--wa-input-border);
+  border-radius: var(--wa-radius-sm);
+  color: var(--wa-ink);
+  font-size: 13.5px;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+
+.wa-template-select:focus {
+  border-color: var(--wa-teal);
+}
+
+.wa-toolbar-count {
+  margin-left: auto;
+  color: var(--wa-muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.wa-filter-clear {
+  border: none;
+  background: none;
+  color: var(--wa-accent);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 4px;
+}
+
+.wa-filter-clear:hover {
+  text-decoration: underline;
+}
+
+/* =========================
+   TEMPLATE CARDS
+   ========================= */
+
+.wa-template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.wa-template-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--wa-paper);
+  border: 1px solid var(--wa-border);
+  border-radius: 12px;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.wa-template-card:hover {
+  box-shadow: var(--wa-shadow-soft);
+  transform: translateY(-1px);
+}
+
+.wa-template-card-head {
+  padding: 16px 16px 0;
+}
+
+.wa-template-card-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.wa-template-card-title-row h3 {
+  min-width: 0;
+  margin: 0;
+  color: var(--wa-ink);
+  font-size: 15.5px;
+  font-weight: 700;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.wa-template-card-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--wa-muted);
+  font-size: 12px;
+}
+
+.wa-category-tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--wa-strip);
+  color: var(--wa-muted-2);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.wa-template-card-body {
+  flex: 1;
+  padding: 12px 16px;
+}
+
+.wa-body-preview {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 0;
+  color: var(--wa-muted-2);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.wa-template-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 16px;
+  border-top: 1px solid var(--wa-border-soft);
+  background: var(--wa-white);
+  border-radius: 0 0 12px 12px;
+}
+
+.wa-template-updated {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--wa-faint);
+  font-size: 12px;
+}
+
+.wa-template-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.wa-templates-page .wa-template-card-actions .view-button {
+  padding: 6px 10px;
+  border: none;
+  background: none;
+  color: var(--wa-teal);
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--wa-radius-sm);
+  font-family: inherit;
+}
+
+.wa-templates-page .wa-template-card-actions .view-button:hover {
+  background: var(--wa-teal-tint);
+}
+
+.wa-template-card .wa-more-button {
+  width: 30px;
+  height: 30px;
+  font-size: 16px;
+}
+
+/* Status badge variants (scoped to the template manager) */
+
+.wa-templates-page .wa-status-badge.approved {
+  background: var(--wa-teal-tint);
+  color: var(--wa-teal-text);
+}
+
+.wa-templates-page .wa-status-badge.draft {
+  background: #F4E6C9;
+  color: #76531C;
+}
+
+.wa-templates-page .wa-status-badge.suspended {
+  background: #E4E7E5;
+  color: var(--wa-muted-2);
+}
+
+/* =========================
+   EMPTY STATE
+   ========================= */
+
+.wa-empty-state {
+  padding: 48px 24px;
+  text-align: center;
+  background: var(--wa-paper);
+  border: 1px dashed var(--wa-border);
+  border-radius: 12px;
+}
+
+.wa-empty-state-icon {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--wa-teal-soft);
+  color: var(--wa-teal);
+  font-size: 20px;
+}
+
+.wa-empty-state h3 {
+  margin: 0 0 6px;
+  color: var(--wa-ink);
+  font-size: 16px;
+}
+
+.wa-empty-state p {
+  margin: 0 auto;
+  max-width: 420px;
+  color: var(--wa-muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.wa-empty-state .primary-action {
+  margin-top: 16px;
+}
+
+/* =========================
+   MODALS (shared)
+   ========================= */
+
+.wa-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 6vh 20px 30px;
+  background: rgba(7, 59, 58, 0.4);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.wa-modal {
+  width: 100%;
+  background: var(--wa-paper);
+  border: 1px solid var(--wa-border);
+  border-radius: 14px;
+  box-shadow: var(--wa-shadow);
+}
+
+.wa-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 24px 6px;
+}
+
+.wa-modal-header h2 {
+  margin: 3px 0 0;
+  color: var(--wa-ink);
+  font-size: 20px;
+  line-height: 1.3;
+}
+
+.wa-modal-header p {
+  margin: 6px 0 0;
+  color: var(--wa-muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.wa-modal-close {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--wa-input-border);
+  border-radius: 50%;
+  background: var(--wa-white);
+  color: var(--wa-muted-2);
+  font-size: 18px;
+  line-height: 1;
+  font-family: inherit;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.wa-modal-close:hover:not(:disabled) {
+  border-color: var(--wa-accent);
+  color: var(--wa-accent);
+}
+
+.wa-modal-close:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.wa-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 8px 24px 22px;
+}
+
+.wa-preview-modal {
+  max-width: 560px;
+}
+
+.wa-confirm-modal {
+  max-width: 460px;
+}
+
+.wa-templates-page .primary-action.danger {
+  background: var(--wa-danger);
+  border-color: var(--wa-danger);
+}
+
+.wa-templates-page .primary-action.danger:hover:not(:disabled) {
+  background: #79342A;
+  border-color: #79342A;
+}
+
+/* =========================
+   TEMPLATE PREVIEW
+   ========================= */
+
+.wa-template-preview {
+  padding: 4px 24px 2px;
+}
+
+.wa-preview-label {
+  display: block;
+  color: var(--wa-faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.wa-preview-phone {
+  background: var(--wa-ivory);
+  border: 1px solid var(--wa-border-soft);
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.wa-preview-phone-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--wa-teal);
+  color: var(--wa-white);
+}
+
+.wa-preview-phone-avatar {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.wa-preview-phone-head strong {
+  display: block;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.wa-preview-phone-head small {
+  display: block;
+  font-size: 10.5px;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.wa-preview-phone-body {
+  min-height: 120px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.wa-preview-chat-row {
+  max-width: 88%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 12px;
+  background: var(--wa-white);
+  border: 1px solid var(--wa-border-soft);
+  border-radius: 12px;
+  border-top-left-radius: 3px;
+}
+
+.wa-preview-chat-text {
+  margin: 0;
+  color: var(--wa-ink-deep);
+  font-size: 13.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.wa-preview-chat-text.is-empty {
+  color: var(--wa-faint);
+  font-style: italic;
+}
+
+.wa-preview-chat-time {
+  align-self: flex-end;
+  color: var(--wa-faint);
+  font-size: 10px;
+}
+
+.wa-preview-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  color: var(--wa-muted);
+  font-size: 12.5px;
+}
+
+.wa-preview-meta-category {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--wa-teal-tint);
+  color: var(--wa-teal-text);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.wa-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--wa-border);
+}
+
+.wa-preview-variables {
+  margin: 16px 0 2px;
+  padding-top: 14px;
+  border-top: 1px solid var(--wa-border-soft);
+}
+
+.wa-preview-variables-label {
+  display: block;
+  color: var(--wa-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.wa-preview-note {
+  color: var(--wa-faint);
+  font-size: 12px;
+}
+
+/* =========================
+   VARIABLE CHIPS (shared)
+   ========================= */
+
+.wa-variable-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.wa-variable-chip {
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: var(--wa-teal-tint);
+  color: var(--wa-teal-text);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.wa-variable-chip.actionable {
+  padding: 6px 11px;
+  cursor: pointer;
+  background: var(--wa-white);
+  border: 1px solid var(--wa-teal);
+  color: var(--wa-teal);
+  font-size: 12px;
+  font-family: inherit;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.wa-variable-chip.actionable:hover {
+  background: var(--wa-teal);
+  color: var(--wa-white);
+}
+
+/* =========================
+   TEMPLATE EDITOR
+   ========================= */
+
+.wa-template-editor {
+  max-width: 1080px;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.wa-template-editor-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 24px 10px;
+}
+
+.wa-template-form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 420px);
+  gap: 20px;
+  align-items: start;
+}
+
+.wa-template-form-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.wa-template-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+/* Scoped form-field overrides to match the light WhatsApp palette */
+
+.wa-template-editor .form-field label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--wa-muted-2);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.wa-template-editor .form-field input,
+.wa-template-editor .form-field select,
+.wa-template-editor .form-field textarea {
+  width: 100%;
+  background: var(--wa-white);
+  border: 1px solid var(--wa-input-border);
+  border-radius: var(--wa-radius-sm);
+  color: var(--wa-ink);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease;
+}
+
+.wa-template-editor .form-field input,
+.wa-template-editor .form-field select {
+  padding: 11px 13px;
+}
+
+.wa-template-editor .form-field textarea {
+  padding: 12px 13px;
+  min-height: 230px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.wa-template-editor .form-field input:focus,
+.wa-template-editor .form-field select:focus,
+.wa-template-editor .form-field textarea:focus {
+  border-color: var(--wa-teal);
+}
+
+.wa-template-editor .form-field input::placeholder,
+.wa-template-editor .form-field textarea::placeholder {
+  color: var(--wa-faint);
+}
+
+.wa-body-count {
+  display: block;
+  margin-top: 6px;
+  text-align: right;
+  color: var(--wa-faint);
+  font-size: 11.5px;
+}
+
+.wa-field-error {
+  display: block;
+  margin-top: 6px;
+  color: var(--wa-danger);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.wa-variable-insert {
+  padding: 14px;
+  background: var(--wa-ivory);
+  border: 1px solid var(--wa-border-soft);
+  border-radius: 10px;
+}
+
+.wa-variable-insert-label {
+  display: block;
+  color: var(--wa-muted-2);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.wa-variable-hint {
+  margin: 8px 0 0;
+  color: var(--wa-faint);
+  font-size: 11.5px;
+}
+
+/* Live preview pane */
+
+.wa-template-form-preview {
+  position: sticky;
+  top: 8px;
+  background: var(--wa-paper);
+  border: 1px solid var(--wa-border-soft);
+  border-radius: 12px;
+  padding: 14px;
+  max-height: min(560px, calc(92vh - 140px));
+  overflow-y: auto;
+}
+
+.wa-template-form-preview .wa-preview-label {
+  margin-bottom: 8px;
+}
+
+.wa-template-form-preview .wa-template-preview {
+  padding: 0;
+}
+
+/* =========================
+   RESPONSIVE
+   ========================= */
+
+@media (max-width: 900px) {
+  .wa-template-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .wa-template-form-preview {
+    position: static;
+    max-height: none;
+  }
+}
+
+@media (max-width: 700px) {
+  .wa-toolbar {
+    align-items: stretch;
+  }
+
+  .wa-template-search {
+    flex-basis: 100%;
+  }
+
+  .wa-template-select {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .wa-toolbar-count {
+    margin-left: 0;
+  }
+
+  .wa-template-form-row {
+    grid-template-columns: 1fr;
+  }
+
+  .wa-modal-actions {
+    flex-direction: column-reverse;
+  }
+
+  .wa-modal-actions .primary-action,
+  .wa-modal-actions .secondary-action {
+    width: 100%;
+  }
+}
